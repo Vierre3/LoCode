@@ -47,6 +47,8 @@ async function listDir(path: string): Promise<FileEntry[]> {
     return result;
 }
 
+// Preload root directory at startup
+let cachedRoot: FileEntry[] = listDir(".");
 
 serve(async (req) => {
     const url = new URL(req.url);
@@ -69,7 +71,7 @@ serve(async (req) => {
 
     if (req.method === "GET" && url.pathname === "/list") {
         const root = url.searchParams.get("path") || ".";
-        const tree = await listDir(root);
+        const tree = await (root === "." ? cachedRoot : listDir(root));
         return new Response(JSON.stringify(tree), {
             status: 200,
             headers: { "Content-Type": "application/json" },

@@ -1,9 +1,8 @@
 <template>
     <ul class="ml-2">
         <li v-for="node in nodes" :key="node.path">
-            <div class="cursor-pointer hover:font-bold"
-                :class="(node.path === file ? 'font-bold' : '')
-                    + (node.path === folder ? 'underline' : '')"
+            <div class="node cursor-pointer py-1.5 px-2 rounded select-none"
+                :class="{ active: node.path === file }"
                 @click="props.onClick(node)">
                 <span>
                     {{ node.type !== 'dir' ? "📄" : node.open ? "📂" : "📁" }} {{ node.name }}
@@ -22,3 +21,20 @@ const props = defineProps<{
     onClick: (node: any) => void
 }>();
 </script>
+
+<style lang="css" scoped>
+.node {
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: font-weight .1s ease;
+}
+
+.node:hover {
+    font-weight: 800;
+}
+
+.node.active {
+    font-weight: 800;
+}
+
+</style>

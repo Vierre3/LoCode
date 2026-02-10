@@ -1,7 +1,7 @@
 <template>
     <div>
         <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
-        <title>WebCode</title>
+        <title>LoCode</title>
         <div class="bg" />
         <div class="bg bg2" />
         <div class="bg bg3" />

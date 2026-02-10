@@ -1,10 +1,5 @@
 <template>
-    <div class="overflow-auto h-full navbar">
-        <!-- <div class="mb-2 text-sm text-gray-400">
-            <span v-for="(crumb, i) in breadcrumbs" :key="i">
-                {{ crumb }} <span v-if="i < breadcrumbs.length - 1">/</span>
-            </span>
-        </div> -->
+    <div class="overflow-auto h-full navbar p-3">
         <FileTree :nodes="tree" :file="file" :folder="folder" :onClick="click" />
     </div>
 </template>
@@ -19,6 +14,12 @@
     transition: .1s ease;
 }
 
+@media (max-width: 767px) {
+    .navbar {
+        backdrop-filter: blur(5px);
+    }
+}
+
 .navbar:hover {
     border-color: rgba(255, 255, 255, 0.37);
 }
@@ -30,12 +31,10 @@ const emit = defineEmits<{ (e: "select-file", path: string): void }>();
 
 const tree = ref<any[]>([]);
 const folder = ref("");
-// const breadcrumbs = ref<string[]>([]);
 
 async function loadTree(path: string): Promise<any[]> {
     folder.value = path;
     const res = await fetch("/api/list?path=" + path);
-    // breadcrumbs.value = path.split("/").filter(Boolean);
     return await res.json();
 }
 
