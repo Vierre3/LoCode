@@ -20,12 +20,16 @@ L'objectif principal est la vitesse : chargement instantané, interactions fluid
 app/                              # Frontend Nuxt
   app.vue                         # Layout racine + fond animé gradient
   pages/
-    index.vue                     # Page principale (éditeur + explorateur)
+    index.vue                     # Page principale (orchestrateur : éditeur, terminal, header)
     [..._].vue                    # Catch-all redirect vers /
   components/
     FileExplorer.vue              # Sidebar explorateur de fichiers
-    FileTree.vue                  # Arbre de fichiers récursif
-    MonacoEditor.client.vue       # Éditeur Monaco (client-only)
+    FileTree.vue                  # Arbre de fichiers récursif (avec drag-and-drop)
+    MonacoEditor.client.vue       # Éditeur Monaco (client-only, émet focus)
+    EditorArea.vue                # Container split editor (1-2 panneaux) avec drop zones
+    UnsavedDialog.vue             # Dialog modal glassmorphism pour modifications non sauvegardées
+    Terminal.client.vue           # Composant xterm.js (client-only, PTY via WebSocket)
+    TerminalPanel.vue             # Panel multi-terminaux avec sidebar et split
   plugins/
     monaco.client.ts              # Initialisation des workers Monaco
   middleware/
@@ -38,6 +42,8 @@ backend/
 
 server/
   api/[...url].ts                 # Proxy Nuxt → Deno
+  routes/
+    _terminal.ts                  # WebSocket handler + node-pty (terminal PTY)
 ```
 
 ## API Backend (Deno)
@@ -124,6 +130,54 @@ DENO_PORT="8080"
 - Gestion du `<head>` via `useHead()` de Nuxt (titre + viewport) au lieu de tags HTML bruts dans le template
 - Polices adaptatives mobile : tailles réduites sur mobile (file tree, file label, boutons, Monaco Editor 12px vs 15px desktop)
 
+### Split Editor
+- Composant `EditorArea.vue` : container pour 1 ou 2 panneaux éditeur côte à côte
+- Drag-and-drop depuis le file tree (`FileTree.vue`) vers l'éditeur pour ouvrir en split (drop zones : left/center/right)
+- `draggable="true"` + `@dragstart` sur les fichiers du file tree avec MIME type `text/locode-file`
+- Drop zone overlay visuel avec 3 zones (Split Left / Replace / Split Right) pendant le drag
+- Resize handle vertical entre les 2 panneaux (min 20% / max 80%, persisté dans `localStorage("locode:splitRatio")`)
+- Noms des fichiers ouverts affichés dans le header, alignés avec la largeur de chaque pane via `splitRatio` exposé par `EditorArea`
+- Bouton close (×) sur chaque fichier ouvert — ferme le pane (ou le vide si c'est le dernier)
+- Clic sur le nom de fichier → focus de l'éditeur correspondant
+- Indicateur dirty (`*` devant le nom) quand le fichier a des modifications non sauvegardées
+- Pas de split sur mobile (< 768px) — un seul pane visible
+- `MonacoEditor.client.vue` émet `focus` via `editor.onDidFocusEditorWidget` pour détecter le pane actif
+
+### Dialog modifications non sauvegardées
+- Composant `UnsavedDialog.vue` : dialog modal glassmorphism centré
+- 3 boutons : Save (sauvegarde puis continue), Discard (continue sans sauver), Cancel (annule)
+- Affiché avant de changer de fichier ou fermer un pane dirty
+- Backdrop semi-transparent, fermeture par clic extérieur ou Escape
+
+### Terminal intégré
+- Terminal PTY complet via xterm.js + node-pty (WebSocket)
+- `Terminal.client.vue` : composant xterm.js avec FitAddon + WebLinksAddon
+- `TerminalPanel.vue` : panel multi-terminaux avec sidebar de sélection
+- `server/routes/_terminal.ts` : WebSocket handler avec `defineWebSocketHandler`, spawn node-pty, messages JSON (create/input/resize/output/exit)
+- `nuxt.config.ts` : `nitro.experimental.websocket: true` pour activer les WebSockets
+- Toggle terminal via clic logo ou raccourci `Ctrl+J` / `Cmd+J`
+- `Ctrl+J` et `Ctrl+S` passent au travers de xterm via `attachCustomKeyEventHandler` (bubble au window handler)
+- Multiples terminaux : création (+), suppression (×), sélection dans la sidebar
+- Numérotation des terminaux avec réutilisation des gaps (Terminal 3 supprimé → le prochain sera Terminal 3)
+- Numérotation réinitialisée à 1 par workspace
+- Resize vertical du panel terminal (min 100px, max 60% viewport, persisté dans `localStorage("locode:terminalHeight")`)
+- Fermeture du dernier terminal → ferme le panel, réouverture crée un Terminal 1 frais
+
+### Terminal split
+- Drag-and-drop des onglets terminaux pour créer un split (2 terminaux côte à côte)
+- Drop overlay avec zones Left/Right pendant le drag
+- Resize handle horizontal entre les 2 terminaux
+- `activeId` = terminal gauche (positionnement), `focusedId` = terminal sélectionné dans la sidebar (highlight)
+- `savedSplit` : mémorise le dernier couple split pour restauration quand on revient
+- Clic sur le contenu d'un terminal en split → met à jour `focusedId` via `@mousedown`
+- Pas de split terminal sur mobile — un seul terminal visible
+- Mobile : barre horizontale d'onglets au-dessus du terminal (pas en overlay)
+
+### Persistance par workspace
+- État de l'éditeur (fichiers ouverts, panes, split) persisté par workspace dans `localStorage`
+- Nombre de terminaux et index de split sauvegardés par workspace
+- Restauration complète au changement de workspace ou refresh
+
 ## Stack technique
 
 - **Nuxt** 4.1.0
@@ -132,3 +186,5 @@ DENO_PORT="8080"
 - **Deno** 2.4.4 (backend)
 - **@nuxt/ui** 3.3.3 + **@nuxt/ui-pro** 3.3.3
 - **Tailwind CSS** (via @nuxt/ui)
+- **@xterm/xterm** 6.0.0 + **@xterm/addon-fit** 0.11.0 + **@xterm/addon-web-links** 0.12.0
+- **node-pty** 1.1.0 (PTY backend pour le terminal)
