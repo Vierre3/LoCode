@@ -4,7 +4,7 @@
         <!-- Mobile: horizontal bar above terminal -->
         <div v-if="isMobile" class="terminal-mobile-bar">
             <div v-for="s in sessions" :key="s.id"
-                class="terminal-mobile-tab" :class="{ active: s.id === activeId }"
+                class="terminal-mobile-tab" :class="{ active: s.id === focusedId }"
                 @click="selectSession(s.id)">
                 {{ s.name }}
             </div>
@@ -30,14 +30,15 @@
                 <div v-for="s in sessions" :key="s.id"
                     class="terminal-slot"
                     :class="termSlotClass(s.id)"
-                    :style="termSlotStyle(s.id)">
+                    :style="termSlotStyle(s.id)"
+                    @mousedown="focusedId = s.id">
                     <Terminal :ref="el => setTermRef(s.id, el)" :cwd="rootPath"
                         :active="s.id === activeId || s.id === splitId" />
                 </div>
             </div>
             <div v-if="!isMobile" class="terminal-sidebar">
                 <div v-for="s in sessions" :key="s.id"
-                    class="terminal-tab" :class="{ active: s.id === activeId, split: s.id === splitId }"
+                    class="terminal-tab" :class="{ active: s.id === focusedId, split: splitId && (s.id === activeId || s.id === splitId) && s.id !== focusedId }"
                     draggable="true"
                     @dragstart="e => onTabDragStart(e, s.id)"
                     @click="selectSession(s.id)">
@@ -81,8 +82,11 @@ function createSessions(count: number): TerminalSession[] {
 }
 
 const sessions = ref<TerminalSession[]>(createSessions(1));
+// activeId = left terminal in split (or the single visible terminal)
 const activeId = ref(sessions.value[0]!.id);
 const splitId = ref<string | null>(null);
+// focusedId = which terminal is highlighted/selected in sidebar
+const focusedId = ref(sessions.value[0]!.id);
 const splitRatio = ref(50);
 
 // Remember last split pair to restore when clicking back
@@ -171,27 +175,53 @@ function onTermDrop(e: DragEvent) {
     const zone = termDropZone.value;
     termDropZone.value = null;
 
-    if (droppedId === activeId.value && !splitId.value) return;
+    if (droppedId === activeId.value && droppedId === splitId.value) return;
 
-    if (droppedId === activeId.value) return;
-
-    if (zone === "left") {
-        splitId.value = activeId.value;
-        activeId.value = droppedId;
-    } else if (zone === "right") {
-        splitId.value = activeId.value;
-        activeId.value = droppedId;
+    if (splitId.value) {
+        // Already split — replace the terminal on the dropped zone's side
+        if (zone === "left") {
+            activeId.value = droppedId;
+            // splitId stays (right side unchanged)
+        } else {
+            splitId.value = droppedId;
+            // activeId stays (left side unchanged)
+        }
+    } else {
+        // Not split — create a new split
+        if (droppedId === activeId.value) return;
+        if (zone === "left") {
+            splitId.value = activeId.value;
+            activeId.value = droppedId;
+        } else {
+            splitId.value = droppedId;
+        }
     }
+    focusedId.value = droppedId;
     savedSplit = null;
     focusTerminal(droppedId);
 }
 
 // --- Session management ---
+function getNextTerminalNum(): number {
+    const usedNums = new Set(sessions.value.map(s => {
+        const m = s.name.match(/^Terminal (\d+)$/);
+        return m ? parseInt(m[1]) : 0;
+    }));
+    let num = 1;
+    while (usedNums.has(num)) num++;
+    return num;
+}
+
 function addSession() {
-    const num = nextId++;
-    const id = "t" + num;
+    const num = getNextTerminalNum();
+    const id = "t" + nextId++;
     sessions.value.push({ id, name: `Terminal ${num}` });
+    if (splitId.value) {
+        savedSplit = { left: activeId.value, right: splitId.value };
+        splitId.value = null;
+    }
     activeId.value = id;
+    focusedId.value = id;
     emit("update:sessionCount", sessions.value.length);
     focusTerminal(id);
 }
@@ -205,17 +235,27 @@ function removeSession() {
         emit("close");
         return;
     }
-    const removedId = activeId.value;
+    const removedId = focusedId.value;
     const idx = sessions.value.findIndex(s => s.id === removedId);
     sessions.value = sessions.value.filter(s => s.id !== removedId);
 
     // If removing one of a split pair, unsplit and show the other full
+    let wasInSplit = false;
     if (splitId.value) {
-        const otherId = splitId.value === removedId ? activeId.value : splitId.value;
-        splitId.value = null;
-        activeId.value = otherId;
+        if (removedId === activeId.value || removedId === splitId.value) {
+            const otherId = activeId.value === removedId ? splitId.value : activeId.value;
+            splitId.value = null;
+            activeId.value = otherId;
+            focusedId.value = otherId;
+            wasInSplit = true;
+        } else {
+            // Removed terminal is not part of the split — keep split, pick new focus
+            focusedId.value = activeId.value;
+        }
     } else {
-        activeId.value = sessions.value[Math.min(idx, sessions.value.length - 1)]!.id;
+        const newId = sessions.value[Math.min(idx, sessions.value.length - 1)]!.id;
+        activeId.value = newId;
+        focusedId.value = newId;
     }
 
     // Invalidate savedSplit if a member was removed
@@ -224,44 +264,50 @@ function removeSession() {
     }
 
     // If savedSplit exists and both members still alive, restore the split
-    if (savedSplit) {
+    // But not if we just unsplit due to removing a split member
+    if (savedSplit && !wasInSplit) {
         const bothExist = sessions.value.some(s => s.id === savedSplit!.left)
             && sessions.value.some(s => s.id === savedSplit!.right);
         if (bothExist) {
             activeId.value = savedSplit.left;
             splitId.value = savedSplit.right;
+            // Keep focusedId if it's part of the restored split
+            if (focusedId.value !== savedSplit.left && focusedId.value !== savedSplit.right) {
+                focusedId.value = savedSplit.left;
+            }
             savedSplit = null;
         }
     }
 
+    // Ensure focusedId is always in sync with activeId when not in split
+    if (!splitId.value) {
+        focusedId.value = activeId.value;
+    }
+
     emit("update:sessionCount", sessions.value.length);
+    focusTerminal(focusedId.value);
 }
 
 function selectSession(id: string) {
     if (splitId.value) {
-        // Clicking one of the two split terminals → swap focus
+        // Clicking one of the two split terminals → just change focus
         if (id === activeId.value || id === splitId.value) {
-            const oldActive = activeId.value;
-            activeId.value = splitId.value;
-            splitId.value = oldActive;
-            focusTerminal(activeId.value);
+            focusedId.value = id;
+            focusTerminal(id);
             return;
         }
         // Clicking a third terminal → save split pair and unsplit
         savedSplit = { left: activeId.value, right: splitId.value };
         splitId.value = null;
-        activeId.value = id;
-        focusTerminal(id);
-        return;
     }
     // Check if clicking a terminal that was part of a saved split
     if (savedSplit && (id === savedSplit.left || id === savedSplit.right)) {
-        // Both terminals still exist → restore split
         const bothExist = sessions.value.some(s => s.id === savedSplit!.left)
             && sessions.value.some(s => s.id === savedSplit!.right);
         if (bothExist) {
             activeId.value = savedSplit.left;
             splitId.value = savedSplit.right;
+            focusedId.value = id;
             savedSplit = null;
             focusTerminal(id);
             return;
@@ -269,6 +315,7 @@ function selectSession(id: string) {
         savedSplit = null;
     }
     activeId.value = id;
+    focusedId.value = id;
     focusTerminal(id);
 }
 
@@ -332,8 +379,10 @@ function startSplitResize() {
 
 function resetSessions(count: number, splitIndex: number) {
     nextId = 1;
+    savedSplit = null;
     sessions.value = createSessions(count);
     activeId.value = sessions.value[0]!.id;
+    focusedId.value = activeId.value;
     splitId.value = splitIndex >= 0 && splitIndex < sessions.value.length
         ? sessions.value[splitIndex]!.id
         : null;
@@ -343,8 +392,10 @@ function resetSessions(count: number, splitIndex: number) {
 function ensureSession() {
     if (sessions.value.length === 0) {
         nextId = 1;
+        savedSplit = null;
         sessions.value = createSessions(1);
         activeId.value = sessions.value[0]!.id;
+        focusedId.value = activeId.value;
         splitId.value = null;
         emit("update:sessionCount", 1);
     }
