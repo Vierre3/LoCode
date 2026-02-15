@@ -62,6 +62,10 @@ watch(
     }
 );
 
+defineExpose({
+    focus() { editor?.focus(); }
+});
+
 onBeforeUnmount(() => {
     if (contentDisposable) {
         contentDisposable.dispose();

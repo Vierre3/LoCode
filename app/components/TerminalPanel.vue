@@ -1,6 +1,16 @@
 <template>
     <div class="terminal-panel" :style="{ height: panelHeight + 'px' }">
         <div class="terminal-resize-handle" @mousedown.prevent="startHeightResize" />
+        <!-- Mobile: horizontal bar above terminal -->
+        <div v-if="isMobile" class="terminal-mobile-bar">
+            <div v-for="s in sessions" :key="s.id"
+                class="terminal-mobile-tab" :class="{ active: s.id === activeId }"
+                @click="selectSession(s.id)">
+                {{ s.name }}
+            </div>
+            <button class="sidebar-btn" @click="addSession">+</button>
+            <button class="sidebar-btn danger" @click="removeSession">&times;</button>
+        </div>
         <div class="terminal-body">
             <div ref="contentRef" class="terminal-content"
                 @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver"
@@ -11,30 +21,19 @@
                     <div class="term-drop-zone" :class="{ hover: termDropZone === 'right' }">Right</div>
                 </div>
 
-                <!-- Single terminal or split -->
-                <template v-if="!splitId">
-                    <div v-for="s in sessions" :key="s.id" class="terminal-slot"
-                        :style="{ display: s.id === activeId ? 'block' : 'none' }">
-                        <Terminal :cwd="rootPath" :active="s.id === activeId" />
-                    </div>
-                </template>
-                <template v-else>
-                    <div class="terminal-slot split-left" :style="{ width: splitRatio + '%' }">
-                        <template v-for="s in sessions" :key="'l-' + s.id">
-                            <div v-if="s.id === activeId" class="h-full">
-                                <Terminal :cwd="rootPath" :active="true" />
-                            </div>
-                        </template>
-                    </div>
-                    <div class="terminal-split-handle" @mousedown.prevent="startSplitResize" />
-                    <div class="terminal-slot split-right">
-                        <template v-for="s in sessions" :key="'r-' + s.id">
-                            <div v-if="s.id === splitId" class="h-full">
-                                <Terminal :cwd="rootPath" :active="true" />
-                            </div>
-                        </template>
-                    </div>
-                </template>
+                <!-- Split resize handle -->
+                <div v-if="splitId" class="terminal-split-handle"
+                    :style="{ left: splitRatio + '%' }"
+                    @mousedown.prevent="startSplitResize" />
+
+                <!-- All terminals rendered once, positioned via CSS -->
+                <div v-for="s in sessions" :key="s.id"
+                    class="terminal-slot"
+                    :class="termSlotClass(s.id)"
+                    :style="termSlotStyle(s.id)">
+                    <Terminal :ref="el => setTermRef(s.id, el)" :cwd="rootPath"
+                        :active="s.id === activeId || s.id === splitId" />
+                </div>
             </div>
             <div v-if="!isMobile" class="terminal-sidebar">
                 <div v-for="s in sessions" :key="s.id"
@@ -46,20 +45,8 @@
                 </div>
                 <div class="terminal-sidebar-actions">
                     <button class="sidebar-btn" @click="addSession" title="New terminal">+</button>
-                    <button class="sidebar-btn danger" @click="removeSession" title="Close terminal"
-                        :disabled="sessions.length <= 1">&times;</button>
+                    <button class="sidebar-btn danger" @click="removeSession" title="Close terminal">&times;</button>
                 </div>
-            </div>
-            <!-- Mobile: horizontal bar at top -->
-            <div v-else class="terminal-mobile-bar">
-                <div v-for="s in sessions" :key="s.id"
-                    class="terminal-mobile-tab" :class="{ active: s.id === activeId }"
-                    @click="selectSession(s.id)">
-                    {{ s.name }}
-                </div>
-                <button class="sidebar-btn" @click="addSession">+</button>
-                <button class="sidebar-btn danger" @click="removeSession"
-                    :disabled="sessions.length <= 1">&times;</button>
             </div>
         </div>
     </div>
@@ -69,13 +56,12 @@
 const props = defineProps<{
     rootPath: string;
     isMobile: boolean;
-    initialCount?: number;
-    initialSplitIndex?: number;
 }>();
 
 const emit = defineEmits<{
     (e: "update:sessionCount", count: number): void;
     (e: "update:splitIndex", index: number): void;
+    (e: "close"): void;
 }>();
 
 interface TerminalSession {
@@ -85,29 +71,55 @@ interface TerminalSession {
 
 let nextId = 1;
 
-function createInitialSessions(): TerminalSession[] {
-    const count = props.initialCount && props.initialCount > 0 ? props.initialCount : 1;
+function createSessions(count: number): TerminalSession[] {
     const arr: TerminalSession[] = [];
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < Math.max(1, count); i++) {
         arr.push({ id: "t" + nextId, name: `Terminal ${nextId}` });
         nextId++;
     }
     return arr;
 }
 
-const sessions = ref<TerminalSession[]>(createInitialSessions());
+const sessions = ref<TerminalSession[]>(createSessions(1));
 const activeId = ref(sessions.value[0]!.id);
-const splitId = ref<string | null>(
-    props.initialSplitIndex != null && props.initialSplitIndex >= 0 && props.initialSplitIndex < sessions.value.length
-        ? sessions.value[props.initialSplitIndex]!.id
-        : null
-);
+const splitId = ref<string | null>(null);
 const splitRatio = ref(50);
+
+// Remember last split pair to restore when clicking back
+let savedSplit: { left: string; right: string } | null = null;
 const contentRef = ref<HTMLElement | null>(null);
 
 const panelHeight = ref(
     import.meta.client ? parseInt(localStorage.getItem("locode:terminalHeight") || "250") : 250
 );
+
+// --- Terminal refs for focus ---
+const termRefs: Record<string, any> = {};
+
+function setTermRef(id: string, el: any) {
+    if (el) termRefs[id] = el;
+    else delete termRefs[id];
+}
+
+function focusTerminal(id: string) {
+    nextTick(() => termRefs[id]?.focus());
+}
+
+function termSlotClass(id: string) {
+    if (!splitId.value) {
+        return { hidden: id !== activeId.value };
+    }
+    if (id === activeId.value) return { 'split-left': true };
+    if (id === splitId.value) return { 'split-right': true };
+    return { hidden: true };
+}
+
+function termSlotStyle(id: string) {
+    if (splitId.value && id === activeId.value) {
+        return { width: splitRatio.value + '%' };
+    }
+    return {};
+}
 
 watch(splitId, () => {
     const idx = splitId.value ? sessions.value.findIndex(s => s.id === splitId.value) : -1;
@@ -161,50 +173,103 @@ function onTermDrop(e: DragEvent) {
 
     if (droppedId === activeId.value && !splitId.value) return;
 
+    if (droppedId === activeId.value) return;
+
     if (zone === "left") {
-        if (droppedId !== activeId.value) {
-            splitId.value = activeId.value;
-            activeId.value = droppedId;
-        }
+        splitId.value = activeId.value;
+        activeId.value = droppedId;
     } else if (zone === "right") {
-        if (droppedId !== activeId.value) {
-            splitId.value = droppedId;
-        }
+        splitId.value = activeId.value;
+        activeId.value = droppedId;
     }
+    savedSplit = null;
+    focusTerminal(droppedId);
 }
 
 // --- Session management ---
 function addSession() {
-    const id = "t" + nextId++;
-    sessions.value.push({ id, name: `Terminal ${sessions.value.length + 1}` });
+    const num = nextId++;
+    const id = "t" + num;
+    sessions.value.push({ id, name: `Terminal ${num}` });
     activeId.value = id;
     emit("update:sessionCount", sessions.value.length);
+    focusTerminal(id);
 }
 
 function removeSession() {
-    if (sessions.value.length <= 1) return;
+    if (sessions.value.length <= 1) {
+        sessions.value = [];
+        splitId.value = null;
+        savedSplit = null;
+        emit("update:sessionCount", 0);
+        emit("close");
+        return;
+    }
     const removedId = activeId.value;
     const idx = sessions.value.findIndex(s => s.id === removedId);
     sessions.value = sessions.value.filter(s => s.id !== removedId);
-    if (splitId.value === removedId) splitId.value = null;
-    activeId.value = sessions.value[Math.min(idx, sessions.value.length - 1)]!.id;
+
+    // If removing one of a split pair, unsplit and show the other full
+    if (splitId.value) {
+        const otherId = splitId.value === removedId ? activeId.value : splitId.value;
+        splitId.value = null;
+        activeId.value = otherId;
+    } else {
+        activeId.value = sessions.value[Math.min(idx, sessions.value.length - 1)]!.id;
+    }
+
+    // Invalidate savedSplit if a member was removed
+    if (savedSplit && (savedSplit.left === removedId || savedSplit.right === removedId)) {
+        savedSplit = null;
+    }
+
+    // If savedSplit exists and both members still alive, restore the split
+    if (savedSplit) {
+        const bothExist = sessions.value.some(s => s.id === savedSplit!.left)
+            && sessions.value.some(s => s.id === savedSplit!.right);
+        if (bothExist) {
+            activeId.value = savedSplit.left;
+            splitId.value = savedSplit.right;
+            savedSplit = null;
+        }
+    }
+
     emit("update:sessionCount", sessions.value.length);
 }
 
 function selectSession(id: string) {
     if (splitId.value) {
+        // Clicking one of the two split terminals → swap focus
         if (id === activeId.value || id === splitId.value) {
-            // Swap focus between the two split terminals
             const oldActive = activeId.value;
             activeId.value = splitId.value;
             splitId.value = oldActive;
+            focusTerminal(activeId.value);
             return;
         }
-        // Third terminal: replace the focused side
+        // Clicking a third terminal → save split pair and unsplit
+        savedSplit = { left: activeId.value, right: splitId.value };
+        splitId.value = null;
         activeId.value = id;
+        focusTerminal(id);
         return;
     }
+    // Check if clicking a terminal that was part of a saved split
+    if (savedSplit && (id === savedSplit.left || id === savedSplit.right)) {
+        // Both terminals still exist → restore split
+        const bothExist = sessions.value.some(s => s.id === savedSplit!.left)
+            && sessions.value.some(s => s.id === savedSplit!.right);
+        if (bothExist) {
+            activeId.value = savedSplit.left;
+            splitId.value = savedSplit.right;
+            savedSplit = null;
+            focusTerminal(id);
+            return;
+        }
+        savedSplit = null;
+    }
     activeId.value = id;
+    focusTerminal(id);
 }
 
 // --- Height resize ---
@@ -265,6 +330,28 @@ function startSplitResize() {
     splitCleanup = cleanup;
 }
 
+function resetSessions(count: number, splitIndex: number) {
+    nextId = 1;
+    sessions.value = createSessions(count);
+    activeId.value = sessions.value[0]!.id;
+    splitId.value = splitIndex >= 0 && splitIndex < sessions.value.length
+        ? sessions.value[splitIndex]!.id
+        : null;
+    emit("update:sessionCount", sessions.value.length);
+}
+
+function ensureSession() {
+    if (sessions.value.length === 0) {
+        nextId = 1;
+        sessions.value = createSessions(1);
+        activeId.value = sessions.value[0]!.id;
+        splitId.value = null;
+        emit("update:sessionCount", 1);
+    }
+}
+
+defineExpose({ resetSessions, ensureSession });
+
 onBeforeUnmount(() => {
     heightCleanup?.();
     splitCleanup?.();
@@ -312,6 +399,14 @@ onBeforeUnmount(() => {
     height: 100%;
 }
 
+.terminal-slot.hidden {
+    position: absolute;
+    left: -9999px;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
 .terminal-slot.split-left {
     flex-shrink: 0;
     height: 100%;
@@ -324,9 +419,13 @@ onBeforeUnmount(() => {
 }
 
 .terminal-split-handle {
-    width: 4px;
+    position: absolute;
+    top: 0;
+    width: 6px;
+    height: 100%;
     cursor: col-resize;
-    flex-shrink: 0;
+    z-index: 5;
+    transform: translateX(-3px);
 }
 
 .terminal-split-handle:hover {
@@ -429,7 +528,7 @@ onBeforeUnmount(() => {
 
 .sidebar-btn.danger:hover {
     color: white;
-    background: rgba(220, 100, 100, 0.3);
+    background: rgba(220, 100, 100, 0.9);
 }
 
 .sidebar-btn:disabled {
@@ -439,16 +538,13 @@ onBeforeUnmount(() => {
 
 /* Mobile bar */
 .terminal-mobile-bar {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
     display: flex;
     align-items: center;
     gap: 4px;
     padding: 4px;
-    background: rgba(30, 30, 30, 0.9);
-    z-index: 5;
+    background: #1e1e1e;
+    border-radius: 5px 5px 0 0;
+    flex-shrink: 0;
     overflow-x: auto;
 }
 

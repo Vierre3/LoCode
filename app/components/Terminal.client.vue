@@ -78,6 +78,14 @@ onMounted(async () => {
         }
     };
 
+    // Let Ctrl+J and Ctrl+S bubble up to the window handler
+    term.attachCustomKeyEventHandler((event) => {
+        if ((event.ctrlKey || event.metaKey) && (event.key === "j" || event.key === "s")) {
+            return false;
+        }
+        return true;
+    });
+
     // Forward terminal input to WebSocket
     term.onData((data) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -85,21 +93,27 @@ onMounted(async () => {
         }
     });
 
-    // Resize observer
-    resizeObserver = new ResizeObserver(() => {
-        if (fitAddon && term) {
-            fitAddon.fit();
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-            }
+    // Resize observer — skip fit when hidden (0 dimensions)
+    resizeObserver = new ResizeObserver((entries) => {
+        if (!fitAddon || !term) return;
+        const entry = entries[0];
+        if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
+        fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
         }
     });
     resizeObserver.observe(termContainer.value);
 });
 
+defineExpose({
+    focus() { term?.focus(); }
+});
+
 watch(() => props.active, (active) => {
-    if (active && fitAddon && term) {
+    if (active && fitAddon && term && termContainer.value) {
         nextTick(() => {
+            if (!termContainer.value || termContainer.value.offsetHeight === 0) return;
             fitAddon!.fit();
             term!.focus();
         });

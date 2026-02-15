@@ -2,9 +2,9 @@
     <ul>
         <li v-for="node in nodes" :key="node.path">
             <div class="node cursor-pointer p-1 rounded select-none flex items-center"
-                :class="{ active: node.path === file }"
+                :class="{ active: openFiles.includes(node.path) }"
                 :draggable="node.type === 'file'"
-                @dragstart="e => { if (node.type === 'file') e.dataTransfer?.setData('text/plain', node.path) }"
+                @dragstart="e => { if (node.type === 'file') { e.dataTransfer?.setData('text/locode-file', node.path); e.dataTransfer!.effectAllowed = 'move'; } }"
                 @click="props.onClick(node)">
                 <span class="flex-1 min-w-0 overflow-hidden">
                     {{ node.type !== 'dir' ? "📄" : node.open ? "📂" : "📁" }} {{ node.name }}
@@ -16,14 +16,14 @@
                 </button>
             </div>
             <FileTree v-if="node.type === 'dir' && node.open" class="ml-5" :nodes="node.children || []"
-                :file="file" :folder="folder" :onClick="onClick" :onSelect="onSelect" />
+                :openFiles="openFiles" :folder="folder" :onClick="onClick" :onSelect="onSelect" />
         </li>
     </ul>
 </template>
 
 <script setup lang="ts">
 const props = defineProps<{
-    file: string, folder: string,
+    openFiles: string[], folder: string,
     nodes: { name: string; path: string; type: "file" | "dir"; children?: any[]; open?: Boolean }[],
     onClick: (node: any) => void,
     onSelect?: (node: any) => void

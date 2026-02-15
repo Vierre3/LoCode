@@ -13,11 +13,10 @@
         <div class="panes-container">
             <div v-for="(pane, i) in panes" :key="pane.id" class="pane"
                 :class="{ active: pane.id === activePaneId }"
-                :style="paneStyle(i)">
-                <button v-if="panes.length > 1" class="close-pane" @click="$emit('close-pane', pane.id)">
-                    &times;
-                </button>
-                <MonacoEditor :modelValue="pane.code" :language="pane.language"
+                :style="paneStyle(i)"
+                @click="focusPane(pane.id)">
+                <MonacoEditor :ref="el => setEditorRef(pane.id, el)"
+                    :modelValue="pane.code" :language="pane.language"
                     @update:modelValue="v => $emit('update:pane', pane.id, 'code', v)"
                     @focus="$emit('set-active', pane.id)" />
             </div>
@@ -57,6 +56,19 @@ const splitRatio = ref(
 );
 let dragCounter = 0;
 
+// --- Editor refs for focus ---
+const editorRefs: Record<string, any> = {};
+
+function setEditorRef(paneId: string, el: any) {
+    if (el) editorRefs[paneId] = el;
+    else delete editorRefs[paneId];
+}
+
+function focusPane(paneId: string) {
+    emit("set-active", paneId);
+    nextTick(() => editorRefs[paneId]?.focus());
+}
+
 function paneStyle(index: number) {
     if (props.panes.length === 1) return { flex: "1 1 0%" };
     return index === 0
@@ -75,12 +87,13 @@ function getZoneFromPosition(e: DragEvent): "left" | "center" | "right" {
 }
 
 function onDragEnter(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes("text/locode-file")) return;
     dragCounter++;
     dragging.value = true;
 }
 
 function onDragOver(e: DragEvent) {
-    if (!props.isMobile) {
+    if (!props.isMobile && dragging.value) {
         dropZone.value = getZoneFromPosition(e);
     }
 }
@@ -97,7 +110,7 @@ function onDragLeave(e: DragEvent) {
 function onDrop(e: DragEvent) {
     dragging.value = false;
     dragCounter = 0;
-    const filePath = e.dataTransfer?.getData("text/plain");
+    const filePath = e.dataTransfer?.getData("text/locode-file");
     const zone = getZoneFromPosition(e);
     if (filePath) {
         emit("drop", zone, filePath);
@@ -131,6 +144,8 @@ function startSplitResize() {
     splitCleanup = cleanup;
 }
 
+defineExpose({ splitRatio, focusPane });
+
 onBeforeUnmount(() => {
     splitCleanup?.();
 });
@@ -163,31 +178,6 @@ onBeforeUnmount(() => {
 .pane.active {
     outline: 1px solid rgba(255, 255, 255, 0.15);
     outline-offset: -1px;
-}
-
-.close-pane {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    z-index: 20;
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    color: rgba(255, 255, 255, 0.5);
-    background: rgba(30, 30, 30, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: .15s ease;
-    line-height: 1;
-}
-
-.close-pane:hover {
-    color: white;
-    background: rgba(220, 100, 100, 0.5);
 }
 
 .split-handle {

@@ -11,32 +11,45 @@
         <!-- Sidebar -->
         <div class="sidebar" :class="{ open: sidebarOpen, 'no-transition': isResizing }" :style="sidebarStyle">
             <FileExplorer @select-file="onSelectFile" @select-root="onSelectRoot"
-                :file="activePane?.filePath || ''" :rootPath="rootPath" />
+                :openFiles="panes.map(p => p.filePath).filter(Boolean)" :rootPath="rootPath" />
             <div v-if="!isMobile" class="resize-handle" @mousedown.prevent="startResize" />
         </div>
 
         <!-- Editor panel -->
         <div class="flex-1 flex flex-col gap-2 min-w-0" :class="{ 'pointer-events-none': isResizing }">
-            <div class="header-bar flex items-center gap-2">
-                <span v-if="activePane?.filePath" class="file-label font-bold" :title="displayPath">
-                    <bdo dir="ltr">{{ activeDirty ? '* ' : '' }}{{ displayPath }}</bdo>
-                </span>
-                <button @click="saveActivePane" class="btn ml-auto" :class="{ 'btn-press': savePressing }"
-                    :disabled="!activePane?.filePath">Save</button>
-                <img src="/logo.svg" alt="LoCode" class="logo logo-btn" @click="terminalOpen = !terminalOpen"
-                    :class="{ active: terminalOpen }" />
+            <div class="header-bar">
+                <div class="file-labels">
+                    <div v-for="(pane, i) in panes" :key="pane.id"
+                        class="file-label-slot" :style="paneLabelStyle(i)">
+                        <span class="file-label"
+                            :class="{ active: pane.id === activePaneId, dirty: isPaneDirty(pane) }"
+                            @click="focusEditorPane(pane.id)" :title="pane.filePath">
+                            {{ isPaneDirty(pane) ? '* ' : '' }}{{ displayPaneName(pane) }}
+                            <button v-if="pane.filePath" class="close-pane-btn"
+                                :class="{ active: pane.id === activePaneId }"
+                                @click.stop="onClosePane(pane.id)">&times;</button>
+                        </span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button @click="saveActivePane" class="btn" :class="{ 'btn-press': savePressing }"
+                        :disabled="!activePane?.filePath">Save</button>
+                    <img src="/logo.svg" alt="LoCode" class="logo logo-btn" @click="terminalOpen = !terminalOpen"
+                        :class="{ active: terminalOpen }" />
+                </div>
             </div>
             <div class="flex-1 min-h-0 flex flex-col gap-2">
                 <div class="flex-1 min-h-0">
-                    <EditorArea :panes="panes" :activePaneId="activePaneId" :isMobile="isMobile"
+                    <EditorArea ref="editorAreaRef" :panes="panes"
+                        :activePaneId="activePaneId" :isMobile="isMobile"
                         @update:pane="onUpdatePane" @set-active="activePaneId = $event"
                         @drop="onEditorDrop" @close-pane="onClosePane" />
                 </div>
-                <TerminalPanel v-if="terminalOpen" :key="rootPath" :rootPath="rootPath"
-                    :isMobile="isMobile" :initialCount="terminalSessionCount"
-                    :initialSplitIndex="terminalSplitIndex"
+                <TerminalPanel ref="terminalPanelRef" v-show="terminalOpen"
+                    :rootPath="rootPath" :isMobile="isMobile"
                     @update:sessionCount="terminalSessionCount = $event"
-                    @update:splitIndex="terminalSplitIndex = $event" />
+                    @update:splitIndex="terminalSplitIndex = $event"
+                    @close="terminalOpen = false" />
             </div>
         </div>
 
@@ -48,11 +61,11 @@
 <style lang="css" scoped>
 .hamburger {
     position: fixed;
-    top: 8px;
+    top: 5px;
     left: 8px;
     z-index: 60;
-    width: 40px;
-    height: 40px;
+    width: 35px;
+    height: 35px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -65,10 +78,6 @@
     border-radius: 8px;
     color: white;
     transition: .2s ease;
-}
-
-.hamburger:active {
-    transform: scale(0.92);
 }
 
 @media (min-width: 768px) {
@@ -137,24 +146,10 @@
         padding-left: 48px;
     }
 
-    .file-label {
-        font-size: 0.75rem;
-    }
-
     .btn {
         font-size: 0.8rem;
         padding: 5px 12px;
     }
-}
-
-.file-label {
-    font-size: 0.9rem;
-    opacity: 0.9;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-    direction: rtl;
 }
 
 .btn {
@@ -197,7 +192,6 @@
 .logo-btn {
     cursor: pointer;
     transition: .2s ease;
-    border: 2px solid transparent;
 }
 
 .logo-btn:hover {
@@ -207,6 +201,93 @@
 .logo-btn.active {
     border-color: rgba(100, 180, 255, 0.5);
     box-shadow: 0 0 12px rgba(100, 180, 255, 0.2);
+}
+
+.header-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.header-actions {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.file-labels {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+}
+
+.file-label-slot {
+    min-width: 0;
+    padding: 2px 4px;
+}
+
+.file-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: .15s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.file-label:hover {
+    transform: translateY(-1px);
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.37);
+}
+
+.file-label.active {
+    color: white;
+    font-weight: 700;
+}
+
+.file-label.dirty {
+    font-style: italic;
+}
+
+.close-pane-btn {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.75);
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: .1s ease;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.close-pane-btn:hover {
+    color: white;
+    background: rgba(220, 100, 100, 0.9);
+}
+
+.close-pane-btn.active {
+    color: white;
+    font-weight: 700;
 }
 </style>
 
@@ -251,6 +332,18 @@ const isMobile = ref(false);
 const terminalOpen = ref(false);
 const terminalSessionCount = ref(1);
 const terminalSplitIndex = ref(-1);
+const terminalPanelRef = ref<{ resetSessions: (count: number, splitIndex: number) => void; ensureSession: () => void } | null>(null);
+
+watch(() => terminalOpen.value, (open) => {
+    if (open) nextTick(() => terminalPanelRef.value?.ensureSession());
+});
+
+const editorAreaRef = ref<{ splitRatio: number; focusPane: (id: string) => void } | null>(null);
+
+function focusEditorPane(paneId: string) {
+    activePaneId.value = paneId;
+    editorAreaRef.value?.focusPane(paneId);
+}
 
 // --- Pane state ---
 const panes = ref<EditorPane[]>([
@@ -259,10 +352,6 @@ const panes = ref<EditorPane[]>([
 const activePaneId = ref("main");
 
 const activePane = computed(() => panes.value.find(p => p.id === activePaneId.value));
-const activeDirty = computed(() => {
-    const p = activePane.value;
-    return p ? p.filePath !== "" && p.code !== p.savedCode : false;
-});
 
 // --- Unsaved dialog ---
 const showUnsavedDialog = ref(false);
@@ -277,15 +366,6 @@ type PendingAction =
     | { type: "drop"; zone: "left" | "center" | "right"; path: string }
     | { type: "close"; paneId: string };
 let pendingAction: PendingAction | null = null;
-
-const displayPath = computed(() => {
-    const p = activePane.value;
-    if (!p || !p.filePath) return "";
-    if (rootPath.value && p.filePath.startsWith(rootPath.value)) {
-        return p.filePath.slice(rootPath.value.length + 1);
-    }
-    return p.filePath;
-});
 
 const sidebarStyle = computed(() => {
     if (isMobile.value) return {};
@@ -375,14 +455,39 @@ function onKeyDown(e: KeyboardEvent) {
     }
 }
 
+// --- Display helpers ---
+function displayPaneName(pane: EditorPane): string {
+    if (!pane.filePath) return "Untitled";
+    if (rootPath.value && pane.filePath.startsWith(rootPath.value)) {
+        return pane.filePath.slice(rootPath.value.length + 1);
+    }
+    return pane.filePath.split("/").pop() || pane.filePath;
+}
+
+function paneLabelStyle(index: number) {
+    if (panes.value.length === 1) return { flex: "1 1 0%" };
+    const ratio = editorAreaRef.value?.splitRatio ?? 50;
+    return index === 0
+        ? { width: ratio + "%", flexShrink: 0 }
+        : { flex: "1 1 0%" };
+}
+
 // --- Pane helpers ---
+const userEdited = new Set<string>();
+
 function isPaneDirty(pane: EditorPane): boolean {
     return pane.filePath !== "" && pane.code !== pane.savedCode;
 }
 
 function onUpdatePane(paneId: string, field: string, value: string) {
     const pane = panes.value.find(p => p.id === paneId);
-    if (pane) (pane as any)[field] = value;
+    if (!pane) return;
+    (pane as any)[field] = value;
+    // When Monaco normalizes content (e.g. line endings), sync savedCode
+    if (field === "code" && pane.code === value && pane.savedCode !== value && !userEdited.has(paneId)) {
+        pane.savedCode = value;
+    }
+    if (field === "code") userEdited.add(paneId);
 }
 
 // --- Workspace helpers ---
@@ -402,6 +507,7 @@ async function restoreWorkspace(path: string) {
         terminalOpen.value = state.terminalOpen;
         terminalSessionCount.value = Math.max(1, state.terminalCount || 1);
         terminalSplitIndex.value = state.terminalSplitIndex ?? -1;
+        terminalPanelRef.value?.resetSessions(terminalSessionCount.value, terminalSplitIndex.value);
 
         const files = state.paneFiles || [];
         if (files.length === 2 && files[0] && files[1]) {
@@ -429,6 +535,7 @@ async function restoreWorkspace(path: string) {
         terminalOpen.value = false;
         terminalSessionCount.value = 1;
         terminalSplitIndex.value = -1;
+        terminalPanelRef.value?.resetSessions(1, -1);
     }
 }
 
@@ -529,11 +636,19 @@ function onClosePane(paneId: string) {
 }
 
 function doClosePane(paneId: string) {
-    const remaining = panes.value.find(p => p.id !== paneId);
-    if (remaining) {
+    if (panes.value.length > 1) {
+        const remaining = panes.value.find(p => p.id !== paneId)!;
         remaining.id = "main";
         panes.value = [remaining];
         activePaneId.value = "main";
+    } else {
+        // Last pane: clear it
+        const pane = panes.value[0]!;
+        userEdited.delete(pane.id);
+        pane.filePath = "";
+        pane.code = "";
+        pane.savedCode = "";
+        pane.language = "";
     }
 }
 
@@ -568,6 +683,7 @@ async function loadFileIntoPane(paneId: string, path: string) {
     const pane = panes.value.find(p => p.id === paneId);
     if (!pane) return;
 
+    userEdited.delete(paneId);
     pane.filePath = path;
 
     try {

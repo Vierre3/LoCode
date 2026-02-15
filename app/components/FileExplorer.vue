@@ -4,7 +4,7 @@
             {{ browsing ? 'Select Folder' : 'Open Folder' }}
         </button>
         <div class="overflow-y-auto overflow-x-hidden flex-1 p-1">
-            <FileTree :nodes="tree" :file="file" :folder="folder" :onClick="click"
+            <FileTree :nodes="tree" :openFiles="openFiles" :folder="folder" :onClick="click"
                 :onSelect="browsing ? selectFolder : undefined" />
         </div>
     </div>
@@ -65,7 +65,7 @@
 </style>
 
 <script setup lang="ts">
-const props = defineProps<{ file: string, rootPath: string }>();
+const props = defineProps<{ openFiles: string[], rootPath: string }>();
 
 const storageKey = computed(() =>
     props.rootPath ? `locode:openFolders:${props.rootPath}` : "locode:openFolders"
