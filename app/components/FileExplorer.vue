@@ -3,7 +3,7 @@
         <button class="browse-btn" @click="toggleBrowse">
             {{ browsing ? 'Select Folder' : 'Open Folder' }}
         </button>
-        <div class="overflow-y-auto overflow-x-hidden flex-1 p-1">
+        <div class="tree-scroll flex-1 p-1">
             <FileTree :nodes="tree" :openFiles="openFiles" :folder="folder" :onClick="click"
                 :onSelect="browsing ? selectFolder : undefined" />
         </div>
@@ -32,9 +32,8 @@
 
 .browse-btn {
     display: block;
-    width: calc(100% - 12px);
     margin: 6px;
-    padding: 5px 8px;
+    padding: 2px 4px;
     font-size: 0.88rem;
     font-weight: 700;
     cursor: pointer;
@@ -55,6 +54,11 @@
 
 .browse-btn:active {
     transform: scale(0.97);
+}
+
+.tree-scroll {
+    overflow-y: auto;
+    overflow-x: auto;
 }
 
 @media (max-width: 767px) {

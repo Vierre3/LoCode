@@ -1,17 +1,17 @@
 <template>
-    <ul>
+    <ul :class="{ 'browse-mode': !!onSelect }">
         <li v-for="node in nodes" :key="node.path">
-            <div class="node cursor-pointer p-1 rounded select-none flex items-center"
-                :class="{ active: openFiles.includes(node.path) }"
-                :draggable="node.type === 'file'"
-                @dragstart="e => { if (node.type === 'file') { e.dataTransfer?.setData('text/locode-file', node.path); e.dataTransfer!.effectAllowed = 'move'; } }"
-                @click="props.onClick(node)">
-                <span class="flex-1 min-w-0 overflow-hidden">
+            <div class="node-row">
+                <div class="node cursor-pointer p-1 rounded select-none"
+                    :class="{ active: openFiles.includes(node.path) }"
+                    :draggable="node.type === 'file'"
+                    @dragstart="e => { if (node.type === 'file') { e.dataTransfer?.setData('text/locode-file', node.path); e.dataTransfer!.effectAllowed = 'move'; } }"
+                    @click="props.onClick(node)">
                     {{ node.type !== 'dir' ? "📄" : node.open ? "📂" : "📁" }} {{ node.name }}
-                </span>
+                </div>
                 <button v-if="onSelect && node.type === 'dir'"
                     @click.stop="onSelect(node)"
-                    class="select-btn flex-shrink-0">
+                    class="select-btn">
                     Open
                 </button>
             </div>
@@ -31,12 +31,16 @@ const props = defineProps<{
 </script>
 
 <style lang="css" scoped>
+.node-row {
+    display: flex;
+    align-items: center;
+}
+
 .node {
     font-weight: 600;
     font-size: 0.95rem;
     transition: font-weight .1s ease;
     white-space: nowrap;
-    overflow: hidden;
 }
 
 .node:hover {
@@ -47,7 +51,16 @@ const props = defineProps<{
     font-weight: 700;
 }
 
+.browse-mode .node {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    mask-image: linear-gradient(to right, black calc(100% - 12px), transparent);
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 12px), transparent);
+}
+
 .select-btn {
+    flex-shrink: 0;
     font-size: 0.65rem;
     font-weight: 700;
     padding: 1px 6px;
@@ -61,7 +74,6 @@ const props = defineProps<{
 }
 
 .select-btn:hover {
-    /* transform: translateY(-2px); */
     background: rgba(255, 255, 255, 0.25);
     border-color: rgba(255, 255, 255, 0.37);
 }

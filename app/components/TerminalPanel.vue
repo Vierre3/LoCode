@@ -71,11 +71,12 @@ interface TerminalSession {
 }
 
 let nextId = 1;
+let epoch = Date.now();
 
 function createSessions(count: number): TerminalSession[] {
     const arr: TerminalSession[] = [];
     for (let i = 0; i < Math.max(1, count); i++) {
-        arr.push({ id: "t" + nextId, name: `Terminal ${nextId}` });
+        arr.push({ id: `t${epoch}-${nextId}`, name: `Terminal ${nextId}` });
         nextId++;
     }
     return arr;
@@ -205,7 +206,7 @@ function onTermDrop(e: DragEvent) {
 function getNextTerminalNum(): number {
     const usedNums = new Set(sessions.value.map(s => {
         const m = s.name.match(/^Terminal (\d+)$/);
-        return m ? parseInt(m[1]) : 0;
+        return m ? parseInt(m[1]!) : 0;
     }));
     let num = 1;
     while (usedNums.has(num)) num++;
@@ -214,7 +215,7 @@ function getNextTerminalNum(): number {
 
 function addSession() {
     const num = getNextTerminalNum();
-    const id = "t" + nextId++;
+    const id = `t${epoch}-${nextId++}`;
     sessions.value.push({ id, name: `Terminal ${num}` });
     if (splitId.value) {
         savedSplit = { left: activeId.value, right: splitId.value };
@@ -379,6 +380,7 @@ function startSplitResize() {
 
 function resetSessions(count: number, splitIndex: number) {
     nextId = 1;
+    epoch = Date.now();
     savedSplit = null;
     sessions.value = createSessions(count);
     activeId.value = sessions.value[0]!.id;
@@ -392,6 +394,7 @@ function resetSessions(count: number, splitIndex: number) {
 function ensureSession() {
     if (sessions.value.length === 0) {
         nextId = 1;
+        epoch = Date.now();
         savedSplit = null;
         sessions.value = createSessions(1);
         activeId.value = sessions.value[0]!.id;
@@ -401,7 +404,11 @@ function ensureSession() {
     }
 }
 
-defineExpose({ resetSessions, ensureSession });
+function focusActive() {
+    focusTerminal(focusedId.value);
+}
+
+defineExpose({ resetSessions, ensureSession, focusActive });
 
 onBeforeUnmount(() => {
     heightCleanup?.();

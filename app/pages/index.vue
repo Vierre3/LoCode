@@ -148,14 +148,14 @@
 
     .btn {
         font-size: 0.8rem;
-        padding: 5px 12px;
+        padding: 5px 10px;
     }
 }
 
 .btn {
     font-weight: bold;
     cursor: pointer;
-    padding: 6px 16px;
+    padding: 4px 8px;
     background-color: rgba(255, 255, 255, 0.12);
     backdrop-filter: blur(15px);
     box-shadow: 0px 0px 25px rgba(227, 228, 237, 0.37);
@@ -331,7 +331,7 @@ const isMobile = ref(false);
 const terminalOpen = ref(false);
 const terminalSessionCount = ref(1);
 const terminalSplitIndex = ref(-1);
-const terminalPanelRef = ref<{ resetSessions: (count: number, splitIndex: number) => void; ensureSession: () => void } | null>(null);
+const terminalPanelRef = ref<{ resetSessions: (count: number, splitIndex: number) => void; ensureSession: () => void; focusActive: () => void } | null>(null);
 
 watch(() => terminalOpen.value, (open) => {
     if (open) nextTick(() => terminalPanelRef.value?.ensureSession());
@@ -451,6 +451,11 @@ function onKeyDown(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === "j") {
         e.preventDefault();
         terminalOpen.value = !terminalOpen.value;
+        if (terminalOpen.value) {
+            nextTick(() => terminalPanelRef.value?.focusActive());
+        } else {
+            nextTick(() => editorAreaRef.value?.focusPane(activePaneId.value));
+        }
     }
 }
 
