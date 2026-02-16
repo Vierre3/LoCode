@@ -112,6 +112,7 @@ DENO_PORT="8080"
 - Bouton "Open" sur chaque dossier en mode browse pour le sélectionner comme racine de travail
 - Persistance du dossier de travail sélectionné dans `localStorage` — restauré après refresh
 - Première visite : affichage automatique du sélecteur de dossier
+- Sélection d'un dossier de travail ferme automatiquement le mode browse et charge le worktree
 - Retour au worktree de travail via Escape ou re-clic sur le bouton
 - Animations hover cohérentes sur tous les boutons (translateY -2px)
 - Chemin du fichier affiché en relatif par rapport au dossier de travail sélectionné
@@ -129,6 +130,20 @@ DENO_PORT="8080"
 - Error handling sur `loadFile()` et `saveFile()` : try-catch réseau, vérification `res.ok`, mutex anti-spam sur save
 - Gestion du `<head>` via `useHead()` de Nuxt (titre + viewport) au lieu de tags HTML bruts dans le template
 - Polices adaptatives mobile : tailles réduites sur mobile (file tree, file label, boutons, Monaco Editor 12px vs 15px desktop)
+
+### Tooltip chemin fichier/dossier
+- Survol prolongé (600ms) d'un fichier ou dossier dans le worktree/browse affiche un tooltip flottant avec le chemin complet
+- Tooltip rendu via `<Teleport to="body">` + `position: fixed` pour dépasser la sidebar
+- Spacer inline dans le tree (div avec `height: 0` → `height: 30px`) pour décaler les nodes en dessous et éviter qu'ils soient cachés par le tooltip
+- Transition CSS de 0.1s sur la hauteur du spacer pour un décalage fluide
+- Chemin affiché avec `~` à la place de `/home/<user>` (regex `^\/home\/[^/]+` → `~`)
+- Communication FileExplorer ↔ FileTree via `provide`/`inject` : `hoveredRawPath` (ref partagé pour le spacer, chemin brut), `hoveredPath` (computed avec `~`, pour l'affichage du tooltip), `showTooltip`/`hideTooltip` (fonctions pour le tooltip flottant)
+- Style glassmorphism cohérent (fond sombre, blur, bordure semi-transparente)
+
+### Explorateur de fichiers — scroll et mode browse
+- Worktree scrollable horizontalement en bloc (`overflow-x: auto` sur le container)
+- Mode browse : texte des noms de dossiers clippé avant le bouton "Open" via `mask-image` gradient (pas de scroll horizontal)
+- Classe `.browse-mode` conditionnelle sur `<ul>` selon `!!onSelect`
 
 ### Split Editor
 - Composant `EditorArea.vue` : container pour 1 ou 2 panneaux éditeur côte à côte
@@ -155,13 +170,16 @@ DENO_PORT="8080"
 - `TerminalPanel.vue` : panel multi-terminaux avec sidebar de sélection
 - `server/routes/_terminal.ts` : WebSocket handler avec `defineWebSocketHandler`, spawn node-pty, messages JSON (create/input/resize/output/exit)
 - `nuxt.config.ts` : `nitro.experimental.websocket: true` pour activer les WebSockets
-- Toggle terminal via clic logo ou raccourci `Ctrl+J` / `Cmd+J`
+- Toggle terminal via clic logo ou raccourci `Ctrl+J` / `Cmd+J` avec gestion du focus (ouverture → focus terminal, fermeture → focus éditeur actif)
+- Fonctions `openTerminal()` / `closeTerminal()` dédiées pour éviter les race conditions (nextTick chaîné)
 - `Ctrl+J` et `Ctrl+S` passent au travers de xterm via `attachCustomKeyEventHandler` (bubble au window handler)
 - Multiples terminaux : création (+), suppression (×), sélection dans la sidebar
 - Numérotation des terminaux avec réutilisation des gaps (Terminal 3 supprimé → le prochain sera Terminal 3)
 - Numérotation réinitialisée à 1 par workspace
+- IDs terminaux préfixés par `epoch` (`t${Date.now()}-${id}`) pour forcer la re-création des composants Vue au changement de workspace
 - Resize vertical du panel terminal (min 100px, max 60% viewport, persisté dans `localStorage("locode:terminalHeight")`)
 - Fermeture du dernier terminal → ferme le panel, réouverture crée un Terminal 1 frais
+- Auto-focus du terminal à la création : `Terminal.client.vue` appelle `term.focus()` à la fin de `onMounted` si `props.active` est `true` (corrige le focus manquant sur les nouveaux terminaux)
 
 ### Terminal split
 - Drag-and-drop des onglets terminaux pour créer un split (2 terminaux côte à côte)
@@ -170,6 +188,7 @@ DENO_PORT="8080"
 - `activeId` = terminal gauche (positionnement), `focusedId` = terminal sélectionné dans la sidebar (highlight)
 - `savedSplit` : mémorise le dernier couple split pour restauration quand on revient
 - Clic sur le contenu d'un terminal en split → met à jour `focusedId` via `@mousedown`
+- Fermeture d'un terminal en split → sélection automatique de l'autre terminal du split
 - Pas de split terminal sur mobile — un seul terminal visible
 - Mobile : barre horizontale d'onglets au-dessus du terminal (pas en overlay)
 

@@ -104,6 +104,11 @@ onMounted(async () => {
         }
     });
     resizeObserver.observe(termContainer.value);
+
+    // Auto-focus if mounted as the active terminal
+    if (props.active) {
+        term.focus();
+    }
 });
 
 defineExpose({

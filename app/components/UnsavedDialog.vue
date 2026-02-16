@@ -45,7 +45,7 @@ defineEmits<{
 }
 
 .dialog-text {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     font-size: 0.95rem;
     margin-bottom: 20px;
     line-height: 1.4;
@@ -63,7 +63,7 @@ defineEmits<{
     font-weight: 700;
     border-radius: 5px;
     cursor: pointer;
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     border: 1px solid rgba(255, 255, 255, 0.15);
     transition: .2s ease;
 }

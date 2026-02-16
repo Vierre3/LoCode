@@ -71,11 +71,12 @@ interface TerminalSession {
 }
 
 let nextId = 1;
+let epoch = Date.now();
 
 function createSessions(count: number): TerminalSession[] {
     const arr: TerminalSession[] = [];
     for (let i = 0; i < Math.max(1, count); i++) {
-        arr.push({ id: "t" + nextId, name: `Terminal ${nextId}` });
+        arr.push({ id: `t${epoch}-${nextId}`, name: `Terminal ${nextId}` });
         nextId++;
     }
     return arr;
@@ -94,7 +95,7 @@ let savedSplit: { left: string; right: string } | null = null;
 const contentRef = ref<HTMLElement | null>(null);
 
 const panelHeight = ref(
-    import.meta.client ? parseInt(localStorage.getItem("locode:terminalHeight") || "250") : 250
+    import.meta.client ? parseInt(localStorage.getItem("locode:terminalHeight") || "254") : 254
 );
 
 // --- Terminal refs for focus ---
@@ -205,7 +206,7 @@ function onTermDrop(e: DragEvent) {
 function getNextTerminalNum(): number {
     const usedNums = new Set(sessions.value.map(s => {
         const m = s.name.match(/^Terminal (\d+)$/);
-        return m ? parseInt(m[1]) : 0;
+        return m ? parseInt(m[1]!) : 0;
     }));
     let num = 1;
     while (usedNums.has(num)) num++;
@@ -214,7 +215,7 @@ function getNextTerminalNum(): number {
 
 function addSession() {
     const num = getNextTerminalNum();
-    const id = "t" + nextId++;
+    const id = `t${epoch}-${nextId++}`;
     sessions.value.push({ id, name: `Terminal ${num}` });
     if (splitId.value) {
         savedSplit = { left: activeId.value, right: splitId.value };
@@ -379,6 +380,7 @@ function startSplitResize() {
 
 function resetSessions(count: number, splitIndex: number) {
     nextId = 1;
+    epoch = Date.now();
     savedSplit = null;
     sessions.value = createSessions(count);
     activeId.value = sessions.value[0]!.id;
@@ -392,6 +394,7 @@ function resetSessions(count: number, splitIndex: number) {
 function ensureSession() {
     if (sessions.value.length === 0) {
         nextId = 1;
+        epoch = Date.now();
         savedSplit = null;
         sessions.value = createSessions(1);
         activeId.value = sessions.value[0]!.id;
@@ -401,7 +404,11 @@ function ensureSession() {
     }
 }
 
-defineExpose({ resetSessions, ensureSession });
+function focusActive() {
+    focusTerminal(focusedId.value);
+}
+
+defineExpose({ resetSessions, ensureSession, focusActive });
 
 onBeforeUnmount(() => {
     heightCleanup?.();
@@ -508,7 +515,7 @@ onBeforeUnmount(() => {
 .term-drop-zone.hover {
     background: rgba(100, 180, 255, 0.15);
     border-color: rgba(100, 180, 255, 0.4);
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* Sidebar */
@@ -537,13 +544,13 @@ onBeforeUnmount(() => {
 }
 
 .terminal-tab:hover {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.37);
 }
 
 .terminal-tab.active {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.12);
     font-weight: 700;
 }
@@ -574,13 +581,13 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-btn:hover {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.37);
 }
 
 .sidebar-btn.danger:hover {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(220, 100, 100, 0.9);
 }
 
@@ -613,7 +620,7 @@ onBeforeUnmount(() => {
 }
 
 .terminal-mobile-tab.active {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.12);
 }
 </style>
