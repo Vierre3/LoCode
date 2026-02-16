@@ -515,7 +515,7 @@ onBeforeUnmount(() => {
 .term-drop-zone.hover {
     background: rgba(100, 180, 255, 0.15);
     border-color: rgba(100, 180, 255, 0.4);
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* Sidebar */
@@ -544,13 +544,13 @@ onBeforeUnmount(() => {
 }
 
 .terminal-tab:hover {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.37);
 }
 
 .terminal-tab.active {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.12);
     font-weight: 700;
 }
@@ -581,13 +581,13 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-btn:hover {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.37);
 }
 
 .sidebar-btn.danger:hover {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(220, 100, 100, 0.9);
 }
 
@@ -620,7 +620,7 @@ onBeforeUnmount(() => {
 }
 
 .terminal-mobile-tab.active {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(255, 255, 255, 0.12);
 }
 </style>

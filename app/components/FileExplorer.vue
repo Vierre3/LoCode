@@ -3,10 +3,15 @@
         <button class="browse-btn" @click="toggleBrowse">
             {{ browsing ? 'Select Folder' : 'Open Folder' }}
         </button>
-        <div class="tree-scroll flex-1 p-1">
+        <div class="overflow-y-auto flex-1 p-1">
             <FileTree :nodes="tree" :openFiles="openFiles" :folder="folder" :onClick="click"
                 :onSelect="browsing ? selectFolder : undefined" />
         </div>
+        <Teleport to="body">
+            <div v-if="hoveredPath" class="path-tooltip" :style="tooltipStyle">
+                {{ hoveredPath }}
+            </div>
+        </Teleport>
     </div>
 </template>
 
@@ -40,7 +45,7 @@
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 4px;
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     text-align: center;
     transition: .2s ease;
     flex-shrink: 0;
@@ -56,15 +61,30 @@
     transform: scale(0.97);
 }
 
-.tree-scroll {
-    overflow-y: auto;
-    overflow-x: auto;
-}
-
 @media (max-width: 767px) {
     .browse-btn {
         font-size: 0.75rem;
     }
+}
+</style>
+
+<style lang="css">
+.path-tooltip {
+    position: fixed;
+    z-index: 100;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(30, 30, 30, 0.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 3px 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    max-width: 90vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 </style>
 
@@ -82,6 +102,23 @@ const emit = defineEmits<{
 const tree = ref<any[]>([]);
 const folder = ref("");
 const browsing = ref(!props.rootPath);
+
+// --- Tooltip ---
+const hoveredPath = ref("");
+const tooltipStyle = ref<Record<string, string>>({});
+provide("hoveredPath", hoveredPath);
+
+provide("showTooltip", (path: string, rect: DOMRect) => {
+    hoveredPath.value = path.replace(/^\/home\/[^/]+/, "~");
+    tooltipStyle.value = {
+        top: rect.bottom + 4 + "px",
+        left: rect.left + "px",
+    };
+});
+
+provide("hideTooltip", () => {
+    hoveredPath.value = "";
+});
 
 async function loadTree(path: string, dirsOnly = false): Promise<any[]> {
     folder.value = path;
@@ -142,6 +179,10 @@ function toggleBrowse() {
 }
 
 function selectFolder(node: any) {
+    browsing.value = false;
+    if (node.path === props.rootPath) {
+        loadWorkTree();
+    }
     emit("select-root", node.path);
 }
 

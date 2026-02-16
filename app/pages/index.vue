@@ -34,7 +34,7 @@
                 <div class="header-actions">
                     <button @click="saveActivePane" class="btn" :class="{ 'btn-press': savePressing }"
                         :disabled="!activePane?.filePath">Save</button>
-                    <img src="/logo.svg" alt="LoCode" class="logo logo-btn" @click="terminalOpen = !terminalOpen"
+                    <img src="/logo.svg" alt="LoCode" class="logo logo-btn" @click="terminalOpen ? closeTerminal() : openTerminal()"
                         :class="{ active: terminalOpen }" />
                 </div>
             </div>
@@ -49,7 +49,7 @@
                     :rootPath="rootPath" :isMobile="isMobile"
                     @update:sessionCount="terminalSessionCount = $event"
                     @update:splitIndex="terminalSplitIndex = $event"
-                    @close="terminalOpen = false" />
+                    @close="closeTerminal" />
             </div>
         </div>
 
@@ -76,7 +76,7 @@
     backdrop-filter: blur(15px);
     border: 2px solid rgba(255, 255, 255, 0.2);
     border-radius: 8px;
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     transition: .2s ease;
 }
 
@@ -162,7 +162,7 @@
     border: 2px solid rgba(255, 255, 255, 0.12);
     border-radius: 5px;
     transition: .3s ease;
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     white-space: nowrap;
 }
 
@@ -236,7 +236,7 @@
     gap: 4px;
     font-size: 0.75rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.9);
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
@@ -248,13 +248,12 @@
 }
 
 .file-label:hover {
-    color: white;
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.37);
 }
 
 .file-label.active {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     font-weight: 700;
 }
 
@@ -280,12 +279,12 @@
 }
 
 .close-pane-btn:hover {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(220, 100, 100, 0.9);
 }
 
 .close-pane-btn.active {
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
     font-weight: 700;
 }
 </style>
@@ -333,9 +332,18 @@ const terminalSessionCount = ref(1);
 const terminalSplitIndex = ref(-1);
 const terminalPanelRef = ref<{ resetSessions: (count: number, splitIndex: number) => void; ensureSession: () => void; focusActive: () => void } | null>(null);
 
-watch(() => terminalOpen.value, (open) => {
-    if (open) nextTick(() => terminalPanelRef.value?.ensureSession());
-});
+function openTerminal() {
+    terminalOpen.value = true;
+    nextTick(() => {
+        terminalPanelRef.value?.ensureSession();
+        nextTick(() => terminalPanelRef.value?.focusActive());
+    });
+}
+
+function closeTerminal() {
+    terminalOpen.value = false;
+    nextTick(() => editorAreaRef.value?.focusPane(activePaneId.value));
+}
 
 const editorAreaRef = ref<{ splitRatio: number; focusPane: (id: string) => void } | null>(null);
 
@@ -450,11 +458,10 @@ function onKeyDown(e: KeyboardEvent) {
     }
     if ((e.ctrlKey || e.metaKey) && e.key === "j") {
         e.preventDefault();
-        terminalOpen.value = !terminalOpen.value;
         if (terminalOpen.value) {
-            nextTick(() => terminalPanelRef.value?.focusActive());
+            closeTerminal();
         } else {
-            nextTick(() => editorAreaRef.value?.focusPane(activePaneId.value));
+            openTerminal();
         }
     }
 }

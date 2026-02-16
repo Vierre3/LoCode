@@ -218,6 +218,6 @@ onBeforeUnmount(() => {
 .drop-zone.hover {
     background: rgba(100, 180, 255, 0.15);
     border-color: rgba(100, 180, 255, 0.4);
-    color: white;
+    color: rgba(255, 255, 255, 0.9);
 }
 </style>
