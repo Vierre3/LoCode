@@ -21,7 +21,8 @@
                     @focus="$emit('set-active', pane.id)" />
                 <Transition name="skeleton-fade">
                     <div v-if="loadingPaneId === pane.id" class="pane-skeleton ml-10">
-                        <div v-for="i in skeletonWidths" class="skeleton-line" :style="{ width: `${i}%`}" />
+                        <div v-for="i in skeletonWidths" class="skeleton-line"
+                            :style="{ width: i / (isMobile ? 1 : 2) + '%'}" />
                     </div>
                 </Transition>
             </div>

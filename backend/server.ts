@@ -7,15 +7,15 @@ type FileEntry = {
     type: "file" | "dir";
 };
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+// const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const textHeaders = { "Content-Type": "text/plain; charset=utf-8" };
 
 async function readFile(path: string): Promise<{ content: string; status: number }> {
     try {
-        const stat = await Deno.stat(path);
-        if (stat.size > MAX_FILE_SIZE) {
-            return { content: `File too large (${(stat.size / 1024 / 1024).toFixed(1)} MB). Max: 5 MB.`, status: 413 };
-        }
+        // const stat = await Deno.stat(path);
+        // if (stat.size > MAX_FILE_SIZE) {
+        //     return { content: `File too large (${(stat.size / 1024 / 1024).toFixed(1)} MB). Max: 5 MB.`, status: 413 };
+        // }
         return { content: await Deno.readTextFile(path), status: 200 };
     } catch (e) {
         console.error(`Error reading ${path}:`, e);
