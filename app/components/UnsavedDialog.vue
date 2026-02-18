@@ -45,7 +45,7 @@ defineEmits<{
     background-color: rgba(30, 30, 30, 0.88);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    border: 1.5px solid rgba(255, 255, 255, 0.18);
+    border: 1.5px solid rgba(255, 255, 255, 0.2);
     border-radius: 12px;
     padding: 24px;
     max-width: 380px;

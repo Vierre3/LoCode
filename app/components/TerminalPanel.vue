@@ -11,7 +11,7 @@
             <button class="sidebar-btn add" @click="addSession"><span class="add-icon">+</span></button>
             <button class="sidebar-btn danger" @click="removeSession"><span class="close-icon">&times;</span></button>
         </div>
-        <div class="terminal-body">
+        <div class="terminal-body" :class="{ 'sidebar-visible': !isMobile }">
             <div ref="contentRef" class="terminal-content"
                 @dragenter.prevent="onDragEnter" @dragover.prevent="onDragOver"
                 @dragleave="onDragLeave" @drop.prevent="onTermDrop">
@@ -95,7 +95,7 @@ let savedSplit: { left: string; right: string } | null = null;
 const contentRef = ref<HTMLElement | null>(null);
 
 const panelHeight = ref(
-    import.meta.client ? parseInt(localStorage.getItem("locode:terminalHeight") || "254") : 254
+    import.meta.client ? parseInt(localStorage.getItem("locode:terminalHeight") || "261") : 261
 );
 
 // --- Terminal refs for focus ---
@@ -438,23 +438,28 @@ onBeforeUnmount(() => {
 
 .terminal-body {
     flex: 1;
-    display: flex;
     min-height: 0;
     background: #1e1e1e;
     border-radius: 5px;
     overflow: hidden;
+    position: relative;
 }
 
 .terminal-content {
-    flex: 1;
+    position: absolute;
+    inset: 0;
     display: flex;
-    min-width: 0;
-    position: relative;
 }
 
 .terminal-slot {
     width: 100%;
     height: 100%;
+}
+
+/* Desktop: réduit la zone visible des terminaux pour ne pas passer sous la sidebar */
+.sidebar-visible .terminal-slot:not(.split-left) {
+    padding-right: 90px;
+    box-sizing: border-box;
 }
 
 .terminal-slot.hidden {
@@ -466,11 +471,13 @@ onBeforeUnmount(() => {
 }
 
 .terminal-slot.split-left {
+    order: 0;
     flex-shrink: 0;
     height: 100%;
 }
 
 .terminal-slot.split-right {
+    order: 1;
     flex: 1;
     height: 100%;
     min-width: 0;
@@ -487,7 +494,7 @@ onBeforeUnmount(() => {
 }
 
 .terminal-split-handle:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.2);
 }
 
 /* Terminal drop overlay */
@@ -520,14 +527,19 @@ onBeforeUnmount(() => {
 
 /* Sidebar */
 .terminal-sidebar {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
     width: 90px;
-    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     border-left: 1px solid rgba(255, 255, 255, 0.08);
     padding: 4px;
     gap: 2px;
     overflow-y: auto;
+    background: #1e1e1e;
+    z-index: 2;
 }
 
 .terminal-tab {

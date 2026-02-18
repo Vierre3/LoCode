@@ -485,7 +485,7 @@ onMounted(() => {
     isMobile.value = mq.matches;
     sidebarOpen.value = !mq.matches;
     mq.addEventListener("change", onMediaChange);
-    window.addEventListener("beforeunload", onBeforeUnload);
+    // window.addEventListener("beforeunload", onBeforeUnload);
 
     const savedWidth = localStorage.getItem("locode:sidebarWidth");
     if (savedWidth) sidebarWidth.value = parseInt(savedWidth);
