@@ -17,7 +17,7 @@ pnpm install
 yarn install
 
 # bun
-bun install/home/py/delivery/LoCode/.gitignore$0
+bun install
 ```
 
 ## Development Server
