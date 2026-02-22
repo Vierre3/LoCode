@@ -195,15 +195,15 @@ onBeforeUnmount(() => {
 .split-handle {
     position: absolute;
     top: 0;
-    width: 6px;
+    width: 4px;
     height: 100%;
     cursor: col-resize;
     z-index: 5;
-    transform: translateX(-3px);
+    transform: translateX(-2px);
 }
 
 .split-handle:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.2);
 }
 
 .drop-overlay {

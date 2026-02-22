@@ -535,6 +535,10 @@ onBeforeUnmount(() => {
     height: 100%;
 }
 
+.terminal-slot.split-left :deep(.xterm) {
+    padding-right: 2px !important;
+}
+
 .terminal-slot.split-right {
     order: 1;
     flex: 1;
@@ -542,18 +546,22 @@ onBeforeUnmount(() => {
     min-width: 0;
 }
 
+.terminal-slot.split-right :deep(.xterm) {
+    padding-left: 2px !important;
+}
+
 .terminal-split-handle {
     position: absolute;
     top: 0;
-    width: 6px;
+    width: 4px;
     height: 100%;
     cursor: col-resize;
     z-index: 5;
-    transform: translateX(-3px);
+    transform: translateX(-2px);
 }
 
 .terminal-split-handle:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.25);
 }
 
 /* Terminal drop overlay */
