@@ -138,14 +138,20 @@
 </style>
 
 <script setup lang="ts">
-const props = defineProps<{ openFiles: string[], rootPath: string }>();
+import type { SkeletonNode } from '~/composables/useLocodeConfig'
+import { DEFAULT_SKELETON } from '~/composables/useLocodeConfig'
 
-const storageKey = computed(() =>
-    props.rootPath ? `locode:openFolders:${props.rootPath}` : "locode:openFolders"
-);
+const props = defineProps<{
+    openFiles: string[];
+    rootPath: string;
+    initialOpenFolders?: string[];
+    initialSkeleton?: SkeletonNode[];
+}>();
 const emit = defineEmits<{
     (e: "select-file", path: string): void,
-    (e: "select-root", path: string): void
+    (e: "select-root", path: string): void,
+    (e: "update:openFolders", folders: string[]): void,
+    (e: "update:skeleton", skeleton: SkeletonNode[]): void,
 }>();
 
 const tree = ref<any[]>([]);
@@ -154,28 +160,12 @@ const browsing = ref(false);
 const treeLoading = ref(false);
 
 // --- Skeleton blueprint ---
-type SkeletonNode = { depth: number; type: string; width: number };
-const DEFAULT_SKELETON: SkeletonNode[] = [
-    { depth: 0, type: "dir", width: 55 },
-    { depth: 1, type: "file", width: 45 },
-    { depth: 1, type: "file", width: 50 },
-    { depth: 0, type: "dir", width: 60 },
-    { depth: 0, type: "file", width: 40 },
-];
-
-function readSkeletonFromStorage(): SkeletonNode[] {
-    if (!import.meta.client || !props.rootPath) return DEFAULT_SKELETON;
-    try {
-        const saved = localStorage.getItem(`locode:skeleton:${props.rootPath}`);
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-    } catch {}
+function readSkeletonFromProps(): SkeletonNode[] {
+    if (props.initialSkeleton && props.initialSkeleton.length > 0) return props.initialSkeleton;
     return DEFAULT_SKELETON;
 }
 
-const skeletonBlueprint = ref<SkeletonNode[]>(readSkeletonFromStorage());
+const skeletonBlueprint = ref<SkeletonNode[]>(readSkeletonFromProps());
 
 function flattenTree(nodes: any[], depth = 0): SkeletonNode[] {
     const result: SkeletonNode[] = [];
@@ -193,7 +183,7 @@ function saveSkeletonBlueprint() {
     if (!props.rootPath) return;
     const blueprint = flattenTree(tree.value);
     if (blueprint.length > 0) {
-        localStorage.setItem(`locode:skeleton:${props.rootPath}`, JSON.stringify(blueprint));
+        emit("update:skeleton", blueprint);
     }
 }
 
@@ -237,7 +227,7 @@ function getOpenPaths(nodes: any[]): string[] {
 }
 
 function saveOpenFolders() {
-    localStorage.setItem(storageKey.value, JSON.stringify(getOpenPaths(tree.value)));
+    emit("update:openFolders", getOpenPaths(tree.value));
 }
 
 async function restoreOpenFolders(nodes: any[], openPaths: Set<string>) {
@@ -254,12 +244,9 @@ async function loadWorkTree() {
     treeLoading.value = true;
     try {
         tree.value = await loadTree(props.rootPath);
-        const saved = localStorage.getItem(storageKey.value);
-        if (saved) {
-            try {
-                const openPaths = new Set<string>(JSON.parse(saved));
-                await restoreOpenFolders(tree.value, openPaths);
-            } catch {}
+        if (props.initialOpenFolders && props.initialOpenFolders.length > 0) {
+            const openPaths = new Set<string>(props.initialOpenFolders);
+            await restoreOpenFolders(tree.value, openPaths);
         }
         saveSkeletonBlueprint();
     } finally {
@@ -343,13 +330,28 @@ function onEscape(e: KeyboardEvent) {
 watch(() => props.rootPath, (newPath) => {
     if (newPath) {
         browsing.value = false;
-        skeletonBlueprint.value = readSkeletonFromStorage();
+        skeletonBlueprint.value = readSkeletonFromProps();
         loadWorkTree();
     }
 });
 
+// When parent pushes fresh config values (workspace switch), update skeleton
+watch(() => props.initialSkeleton, (val) => {
+    if (val && val.length > 0) skeletonBlueprint.value = val;
+});
+
+// One-shot: re-apply open folders when config loads after the tree is already mounted
+// (happens on initial page load when rootPath is pre-set but config loads async)
+const unwatchInitialFolders = watch(() => props.initialOpenFolders, async (newVal, oldVal) => {
+    // Only fire when going from empty → non-empty (config first load, not workspace switch)
+    if (!newVal?.length || oldVal?.length || treeLoading.value || !tree.value.length) return;
+    unwatchInitialFolders();
+    await restoreOpenFolders(tree.value, new Set(newVal));
+    saveSkeletonBlueprint();
+}, { immediate: false });
+
 onMounted(async () => {
-    skeletonBlueprint.value = readSkeletonFromStorage();
+    skeletonBlueprint.value = readSkeletonFromProps();
     treeLoading.value = true;
     if (!props.rootPath) {
         browsing.value = true;

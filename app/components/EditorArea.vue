@@ -46,6 +46,7 @@ const props = defineProps<{
     activePaneId: string;
     isMobile: boolean;
     loadingPaneId?: string | null;
+    initialSplitRatio?: number;
 }>();
 
 const emit = defineEmits<{
@@ -53,15 +54,18 @@ const emit = defineEmits<{
     (e: "set-active", paneId: string): void;
     (e: "drop", zone: "left" | "center" | "right", filePath: string): void;
     (e: "close-pane", paneId: string): void;
+    (e: "update:splitRatio", ratio: number): void;
 }>();
 
 const skeletonWidths = [10, 20, 33, 45, 72, 30, 60, 70, 55, 65, 20, 33, 10];
 const containerRef = ref<HTMLDivElement | null>(null);
 const dragging = ref(false);
 const dropZone = ref<"left" | "center" | "right" | null>(null);
-const splitRatio = ref(
-    import.meta.client ? parseInt(localStorage.getItem("locode:splitRatio") || "50") : 50
-);
+const splitRatio = ref(props.initialSplitRatio ?? 50);
+
+watch(() => props.initialSplitRatio, (val) => {
+    if (val !== undefined) splitRatio.value = val;
+});
 let dragCounter = 0;
 
 // --- Editor refs for focus ---
@@ -142,7 +146,7 @@ function startSplitResize() {
     const cleanup = () => {
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
-        localStorage.setItem("locode:splitRatio", String(Math.round(splitRatio.value)));
+        emit("update:splitRatio", Math.round(splitRatio.value));
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", cleanup);
         splitCleanup = null;

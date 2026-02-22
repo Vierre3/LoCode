@@ -33,7 +33,8 @@
                     :style="termSlotStyle(s.id)"
                     @mousedown="focusedId = s.id">
                     <Terminal :ref="el => setTermRef(s.id, el)" :cwd="rootPath"
-                        :active="s.id === activeId || s.id === splitId" />
+                        :active="s.id === activeId || s.id === splitId"
+                        :focused="s.id === focusedId" />
                 </div>
             </div>
             <div v-if="!isMobile" class="terminal-sidebar">
@@ -57,11 +58,16 @@
 const props = defineProps<{
     rootPath: string;
     isMobile: boolean;
+    initialTerminalHeight?: number;
 }>();
 
 const emit = defineEmits<{
     (e: "update:sessionCount", count: number): void;
     (e: "update:splitIndex", index: number): void;
+    (e: "update:activeSplitLeft", index: number): void;
+    (e: "update:focusedIndex", index: number): void;
+    (e: "update:savedPairs", pairs: [number, number][]): void;
+    (e: "update:terminalHeight", height: number): void;
     (e: "close"): void;
 }>();
 
@@ -90,13 +96,15 @@ const splitId = ref<string | null>(null);
 const focusedId = ref(sessions.value[0]!.id);
 const splitRatio = ref(50);
 
-// Remember last split pair to restore when clicking back
-let savedSplit: { left: string; right: string } | null = null;
+// Map: terminalId → { left, right } for ALL saved (non-active) split pairs
+const savedPairsMap = reactive(new Map<string, { left: string; right: string }>());
 const contentRef = ref<HTMLElement | null>(null);
 
-const panelHeight = ref(
-    import.meta.client ? parseInt(localStorage.getItem("locode:terminalHeight") || "261") : 261
-);
+const panelHeight = ref(props.initialTerminalHeight ?? 261);
+
+watch(() => props.initialTerminalHeight, (val) => {
+    if (val !== undefined) panelHeight.value = val;
+});
 
 // --- Terminal refs for focus ---
 const termRefs: Record<string, any> = {};
@@ -130,6 +138,67 @@ watch(splitId, () => {
     const idx = splitId.value ? sessions.value.findIndex(s => s.id === splitId.value) : -1;
     emit("update:splitIndex", idx);
 });
+
+watch(activeId, () => {
+    const idx = sessions.value.findIndex(s => s.id === activeId.value);
+    emit("update:activeSplitLeft", idx);
+});
+
+watch(focusedId, () => {
+    const idx = sessions.value.findIndex(s => s.id === focusedId.value);
+    emit("update:focusedIndex", idx);
+});
+
+// --- Saved pairs helpers ---
+function getSavedPairsAsIndices(): [number, number][] {
+    const seen = new Set<string>();
+    const pairs: [number, number][] = [];
+    for (const [id, pair] of savedPairsMap) {
+        if (seen.has(id)) continue;
+        seen.add(pair.left);
+        seen.add(pair.right);
+        const leftIdx = sessions.value.findIndex(s => s.id === pair.left);
+        const rightIdx = sessions.value.findIndex(s => s.id === pair.right);
+        if (leftIdx >= 0 && rightIdx >= 0) pairs.push([leftIdx, rightIdx]);
+    }
+    return pairs;
+}
+
+function emitSavedPairs() {
+    emit("update:savedPairs", getSavedPairsAsIndices());
+}
+
+function saveCurrentSplit() {
+    if (!splitId.value) return;
+    const pair = { left: activeId.value, right: splitId.value };
+    savedPairsMap.set(activeId.value, pair);
+    savedPairsMap.set(splitId.value, pair);
+    splitId.value = null;
+}
+
+function clearSavedPairForId(id: string) {
+    const pair = savedPairsMap.get(id);
+    if (!pair) return;
+    savedPairsMap.delete(pair.left);
+    savedPairsMap.delete(pair.right);
+}
+
+function tryRestoreSavedPair(id: string): boolean {
+    const savedPair = savedPairsMap.get(id);
+    if (!savedPair) return false;
+    const leftExists = sessions.value.some(s => s.id === savedPair.left);
+    const rightExists = sessions.value.some(s => s.id === savedPair.right);
+    if (leftExists && rightExists) {
+        savedPairsMap.delete(savedPair.left);
+        savedPairsMap.delete(savedPair.right);
+        activeId.value = savedPair.left;
+        splitId.value = savedPair.right;
+        return true;
+    }
+    // Stale entry — clean up
+    clearSavedPairForId(id);
+    return false;
+}
 
 // --- Terminal drag-and-drop for split ---
 const termDragging = ref(false);
@@ -176,20 +245,17 @@ function onTermDrop(e: DragEvent) {
     const zone = termDropZone.value;
     termDropZone.value = null;
 
-    if (droppedId === activeId.value && droppedId === splitId.value) return;
-
     if (splitId.value) {
-        // Already split — replace the terminal on the dropped zone's side
+        // Already split — replace one side; clear any saved pair for the incoming terminal
+        clearSavedPairForId(droppedId);
         if (zone === "left") {
             activeId.value = droppedId;
-            // splitId stays (right side unchanged)
         } else {
             splitId.value = droppedId;
-            // activeId stays (left side unchanged)
         }
     } else {
-        // Not split — create a new split
         if (droppedId === activeId.value) return;
+        clearSavedPairForId(droppedId);
         if (zone === "left") {
             splitId.value = activeId.value;
             activeId.value = droppedId;
@@ -198,7 +264,7 @@ function onTermDrop(e: DragEvent) {
         }
     }
     focusedId.value = droppedId;
-    savedSplit = null;
+    emitSavedPairs();
     focusTerminal(droppedId);
 }
 
@@ -218,12 +284,12 @@ function addSession() {
     const id = `t${epoch}-${nextId++}`;
     sessions.value.push({ id, name: `Terminal ${num}` });
     if (splitId.value) {
-        savedSplit = { left: activeId.value, right: splitId.value };
-        splitId.value = null;
+        saveCurrentSplit();
     }
     activeId.value = id;
     focusedId.value = id;
     emit("update:sessionCount", sessions.value.length);
+    emitSavedPairs();
     focusTerminal(id);
 }
 
@@ -231,8 +297,9 @@ function removeSession() {
     if (sessions.value.length <= 1) {
         sessions.value = [];
         splitId.value = null;
-        savedSplit = null;
+        savedPairsMap.clear();
         emit("update:sessionCount", 0);
+        emit("update:savedPairs", []);
         emit("close");
         return;
     }
@@ -240,83 +307,59 @@ function removeSession() {
     const idx = sessions.value.findIndex(s => s.id === removedId);
     sessions.value = sessions.value.filter(s => s.id !== removedId);
 
-    // If removing one of a split pair, unsplit and show the other full
-    let wasInSplit = false;
+    // Clean up the removed terminal from all saved pairs
+    clearSavedPairForId(removedId);
+
+    let newFocusId: string;
     if (splitId.value) {
         if (removedId === activeId.value || removedId === splitId.value) {
+            // Removing one side of the active split
             const otherId = activeId.value === removedId ? splitId.value : activeId.value;
             splitId.value = null;
             activeId.value = otherId;
-            focusedId.value = otherId;
-            wasInSplit = true;
+            newFocusId = otherId;
         } else {
-            // Removed terminal is not part of the split — keep split, pick new focus
-            focusedId.value = activeId.value;
+            // Removing a non-split terminal — keep split
+            newFocusId = activeId.value;
         }
     } else {
-        const newId = sessions.value[Math.min(idx, sessions.value.length - 1)]!.id;
-        activeId.value = newId;
-        focusedId.value = newId;
+        newFocusId = sessions.value[Math.min(idx, sessions.value.length - 1)]!.id;
+        activeId.value = newFocusId;
     }
+    focusedId.value = newFocusId;
 
-    // Invalidate savedSplit if a member was removed
-    if (savedSplit && (savedSplit.left === removedId || savedSplit.right === removedId)) {
-        savedSplit = null;
-    }
-
-    // If savedSplit exists and both members still alive, restore the split
-    // But not if we just unsplit due to removing a split member
-    if (savedSplit && !wasInSplit) {
-        const bothExist = sessions.value.some(s => s.id === savedSplit!.left)
-            && sessions.value.some(s => s.id === savedSplit!.right);
-        if (bothExist) {
-            activeId.value = savedSplit.left;
-            splitId.value = savedSplit.right;
-            // Keep focusedId if it's part of the restored split
-            if (focusedId.value !== savedSplit.left && focusedId.value !== savedSplit.right) {
-                focusedId.value = savedSplit.left;
-            }
-            savedSplit = null;
-        }
-    }
-
-    // Ensure focusedId is always in sync with activeId when not in split
+    // Try to restore a saved pair for the new focus
     if (!splitId.value) {
-        focusedId.value = activeId.value;
+        tryRestoreSavedPair(newFocusId);
+        if (!splitId.value) focusedId.value = activeId.value;
     }
 
     emit("update:sessionCount", sessions.value.length);
+    emitSavedPairs();
     focusTerminal(focusedId.value);
 }
 
 function selectSession(id: string) {
     if (splitId.value) {
-        // Clicking one of the two split terminals → just change focus
+        // Clicking one of the two active split terminals → just change focus
         if (id === activeId.value || id === splitId.value) {
             focusedId.value = id;
             focusTerminal(id);
             return;
         }
-        // Clicking a third terminal → save split pair and unsplit
-        savedSplit = { left: activeId.value, right: splitId.value };
-        splitId.value = null;
+        // Clicking a third terminal → save current split pair and unsplit
+        saveCurrentSplit();
     }
-    // Check if clicking a terminal that was part of a saved split
-    if (savedSplit && (id === savedSplit.left || id === savedSplit.right)) {
-        const bothExist = sessions.value.some(s => s.id === savedSplit!.left)
-            && sessions.value.some(s => s.id === savedSplit!.right);
-        if (bothExist) {
-            activeId.value = savedSplit.left;
-            splitId.value = savedSplit.right;
-            focusedId.value = id;
-            savedSplit = null;
-            focusTerminal(id);
-            return;
-        }
-        savedSplit = null;
+    // Try to restore a saved pair for this terminal
+    if (tryRestoreSavedPair(id)) {
+        focusedId.value = id;
+        emitSavedPairs();
+        focusTerminal(id);
+        return;
     }
     activeId.value = id;
     focusedId.value = id;
+    emitSavedPairs();
     focusTerminal(id);
 }
 
@@ -338,7 +381,7 @@ function startHeightResize() {
     const cleanup = () => {
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
-        localStorage.setItem("locode:terminalHeight", String(panelHeight.value));
+        emit("update:terminalHeight", panelHeight.value);
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", cleanup);
         heightCleanup = null;
@@ -378,16 +421,32 @@ function startSplitResize() {
     splitCleanup = cleanup;
 }
 
-function resetSessions(count: number, splitIndex: number) {
+function resetSessions(count: number, splitIndex: number, savedPairsData?: [number, number][], activeSplitLeftIdx?: number, focusedIdx?: number) {
     nextId = 1;
     epoch = Date.now();
-    savedSplit = null;
+    savedPairsMap.clear();
     sessions.value = createSessions(count);
-    activeId.value = sessions.value[0]!.id;
-    focusedId.value = activeId.value;
+    const leftIdx = (activeSplitLeftIdx !== undefined && activeSplitLeftIdx >= 0 && activeSplitLeftIdx < sessions.value.length)
+        ? activeSplitLeftIdx : 0;
+    activeId.value = sessions.value[leftIdx]!.id;
+    const focIdx = (focusedIdx !== undefined && focusedIdx >= 0 && focusedIdx < sessions.value.length)
+        ? focusedIdx : leftIdx;
+    focusedId.value = sessions.value[focIdx]!.id;
     splitId.value = splitIndex >= 0 && splitIndex < sessions.value.length
         ? sessions.value[splitIndex]!.id
         : null;
+    // Restore saved pairs by index
+    if (savedPairsData) {
+        for (const [leftIdx, rightIdx] of savedPairsData) {
+            if (leftIdx >= 0 && leftIdx < sessions.value.length && rightIdx >= 0 && rightIdx < sessions.value.length) {
+                const leftId = sessions.value[leftIdx]!.id;
+                const rightId = sessions.value[rightIdx]!.id;
+                const pair = { left: leftId, right: rightId };
+                savedPairsMap.set(leftId, pair);
+                savedPairsMap.set(rightId, pair);
+            }
+        }
+    }
     emit("update:sessionCount", sessions.value.length);
 }
 
@@ -395,7 +454,7 @@ function ensureSession() {
     if (sessions.value.length === 0) {
         nextId = 1;
         epoch = Date.now();
-        savedSplit = null;
+        savedPairsMap.clear();
         sessions.value = createSessions(1);
         activeId.value = sessions.value[0]!.id;
         focusedId.value = activeId.value;

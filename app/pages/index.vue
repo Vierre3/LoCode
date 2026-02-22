@@ -17,8 +17,11 @@
 
         <!-- Sidebar -->
         <div class="sidebar" :class="{ open: sidebarOpen, 'no-transition': isResizing }" :style="sidebarStyle">
-            <FileExplorer @select-file="onSelectFile" @select-root="onSelectRoot"
-                :openFiles="panes.map(p => p.filePath).filter(Boolean)" :rootPath="rootPath" />
+            <FileExplorer
+                @select-file="onSelectFile" @select-root="onSelectRoot"
+                @update:openFolders="onUpdateOpenFolders" @update:skeleton="onUpdateSkeleton"
+                :openFiles="panes.map(p => p.filePath).filter(Boolean)" :rootPath="rootPath"
+                :initialOpenFolders="cfgOpenFolders" :initialSkeleton="cfgSkeleton" />
             <div v-if="!isMobile" class="resize-handle" @mousedown.prevent="startResize" />
         </div>
 
@@ -50,14 +53,19 @@
                 <div class="flex-1 min-h-0">
                     <EditorArea ref="editorAreaRef" :panes="panes"
                         :activePaneId="activePaneId" :isMobile="isMobile"
-                        :loadingPaneId="loadingPaneId"
+                        :loadingPaneId="loadingPaneId" :initialSplitRatio="cfgSplitRatio"
                         @update:pane="onUpdatePane" @set-active="activePaneId = $event"
-                        @drop="onEditorDrop" @close-pane="onClosePane" />
+                        @drop="onEditorDrop" @close-pane="onClosePane"
+                        @update:splitRatio="onUpdateSplitRatio" />
                 </div>
                 <TerminalPanel ref="terminalPanelRef" v-show="terminalOpen"
-                    :rootPath="rootPath" :isMobile="isMobile"
+                    :rootPath="rootPath" :isMobile="isMobile" :initialTerminalHeight="cfgTerminalHeight"
                     @update:sessionCount="terminalSessionCount = $event"
                     @update:splitIndex="terminalSplitIndex = $event"
+                    @update:activeSplitLeft="terminalActiveSplitLeft = $event"
+                    @update:focusedIndex="terminalFocusedIndex = $event"
+                    @update:savedPairs="terminalSavedPairs = $event"
+                    @update:terminalHeight="onUpdateTerminalHeight"
                     @close="closeTerminal" />
             </div>
         </div>
@@ -354,33 +362,16 @@
 
 <script setup lang="ts">
 import type { EditorPane } from '~/components/EditorArea.vue';
+import { useLocodeConfig } from '~/composables/useLocodeConfig';
+import type { LocodeConfig, SkeletonNode } from '~/composables/useLocodeConfig';
 
-// --- Workspace state persistence ---
-interface WorkspaceState {
-    paneFiles: string[];
-    activePaneIndex: number;
-    terminalOpen: boolean;
-    terminalCount: number;
-    terminalSplitIndex: number;
-}
+const { loadConfig, saveConfig } = useLocodeConfig();
 
-function workspaceKey(path: string) {
-    return `locode:workspace:${path}`;
-}
-
-function saveWorkspaceState(path: string, state: WorkspaceState) {
-    if (!path) return;
-    localStorage.setItem(workspaceKey(path), JSON.stringify(state));
-}
-
-function loadWorkspaceState(path: string): WorkspaceState | null {
-    if (!path) return null;
-    try {
-        const raw = localStorage.getItem(workspaceKey(path));
-        if (raw) return JSON.parse(raw) as WorkspaceState;
-    } catch {}
-    return null;
-}
+// --- Config state (loaded from .LoCode) ---
+const cfgOpenFolders = ref<string[]>([]);
+const cfgSkeleton = ref<SkeletonNode[]>([]);
+const cfgSplitRatio = ref(50);
+const cfgTerminalHeight = ref(261);
 
 const rootPath = ref(
     import.meta.client ? localStorage.getItem("locode:rootPath") || "" : ""
@@ -395,10 +386,56 @@ const isMobile = ref(false);
 const terminalOpen = ref(false);
 const terminalSessionCount = ref(1);
 const terminalSplitIndex = ref(-1);
-const terminalPanelRef = ref<{ resetSessions: (count: number, splitIndex: number) => void; ensureSession: () => void; focusActive: () => void } | null>(null);
+const terminalActiveSplitLeft = ref(0);
+const terminalFocusedIndex = ref(0);
+const terminalSavedPairs = ref<[number, number][]>([]);
+const terminalPanelRef = ref<{ resetSessions: (count: number, splitIndex: number, savedPairsData?: [number, number][], activeSplitLeftIdx?: number, focusedIdx?: number) => void; ensureSession: () => void; focusActive: () => void } | null>(null);
+
+// --- Persist workspace state to .LoCode ---
+function saveWorkspaceConfig() {
+    if (!rootPath.value) return;
+    saveConfig(rootPath.value, {
+        paneFiles: panes.value.map(p => p.filePath),
+        activePaneIndex: panes.value.findIndex(p => p.id === activePaneId.value),
+        terminalOpen: terminalOpen.value,
+        terminalCount: terminalSessionCount.value,
+        terminalSplitIndex: terminalSplitIndex.value,
+        terminalActiveSplitLeft: terminalActiveSplitLeft.value,
+        terminalFocusedIndex: terminalFocusedIndex.value,
+        terminalSavedPairs: terminalSavedPairs.value,
+    });
+}
+
+watch(terminalSessionCount, () => saveWorkspaceConfig());
+watch(terminalSplitIndex, () => saveWorkspaceConfig());
+watch(terminalActiveSplitLeft, () => saveWorkspaceConfig());
+watch(terminalFocusedIndex, () => saveWorkspaceConfig());
+watch(terminalSavedPairs, () => saveWorkspaceConfig());
+
+// --- Config update handlers (from child emits) ---
+function onUpdateOpenFolders(folders: string[]) {
+    cfgOpenFolders.value = folders;
+    saveConfig(rootPath.value, { openFolders: folders });
+}
+
+function onUpdateSkeleton(skeleton: SkeletonNode[]) {
+    cfgSkeleton.value = skeleton;
+    saveConfig(rootPath.value, { skeleton });
+}
+
+function onUpdateSplitRatio(ratio: number) {
+    cfgSplitRatio.value = ratio;
+    saveConfig(rootPath.value, { splitRatio: ratio });
+}
+
+function onUpdateTerminalHeight(height: number) {
+    cfgTerminalHeight.value = height;
+    saveConfig(rootPath.value, { terminalHeight: height });
+}
 
 function openTerminal() {
     terminalOpen.value = true;
+    saveWorkspaceConfig();
     nextTick(() => {
         terminalPanelRef.value?.ensureSession();
         nextTick(() => terminalPanelRef.value?.focusActive());
@@ -407,6 +444,7 @@ function openTerminal() {
 
 function closeTerminal() {
     terminalOpen.value = false;
+    saveWorkspaceConfig();
     nextTick(() => editorAreaRef.value?.focusPane(activePaneId.value));
 }
 
@@ -456,7 +494,7 @@ function startResize(e: MouseEvent) {
         isResizing.value = false;
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
-        localStorage.setItem("locode:sidebarWidth", String(sidebarWidth.value));
+        saveConfig(rootPath.value, { sidebarWidth: sidebarWidth.value });
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", cleanup);
         resizeCleanup = null;
@@ -474,43 +512,36 @@ function onMediaChange(e: MediaQueryListEvent) {
     sidebarOpen.value = !e.matches;
 }
 
-function onBeforeUnload() {
-    if (rootPath.value) {
-        saveWorkspaceState(rootPath.value, getCurrentWorkspaceState());
-    }
-}
-
-onMounted(() => {
+onMounted(async () => {
     mq = window.matchMedia("(max-width: 767px)");
     isMobile.value = mq.matches;
     sidebarOpen.value = !mq.matches;
     mq.addEventListener("change", onMediaChange);
-    // window.addEventListener("beforeunload", onBeforeUnload);
-
-    const savedWidth = localStorage.getItem("locode:sidebarWidth");
-    if (savedWidth) sidebarWidth.value = parseInt(savedWidth);
-
-    // Restore workspace state for current rootPath
-    if (rootPath.value) {
-        restoreWorkspace(rootPath.value);
-    } else {
-        // Fallback: legacy single-file restore
-        const saved = localStorage.getItem("locode:currentFile");
-        if (saved) loadFileIntoPane("main", saved);
-    }
-
     window.addEventListener("keydown", onKeyDown);
+
+    // Purge legacy localStorage keys (migration from pre-.LoCode storage)
+    const legacyPrefixes = ["locode:workspace:", "locode:openFolders:", "locode:skeleton:"];
+    Object.keys(localStorage)
+        .filter(k => legacyPrefixes.some(p => k.startsWith(p)))
+        .forEach(k => localStorage.removeItem(k));
+    ["locode:sidebarWidth", "locode:splitRatio", "locode:terminalHeight", "locode:currentFile"].forEach(k => localStorage.removeItem(k));
+
+    if (rootPath.value) {
+        const config = await loadConfig(rootPath.value);
+        sidebarWidth.value = config.sidebarWidth;
+        cfgOpenFolders.value = config.openFolders;
+        cfgSkeleton.value = config.skeleton;
+        cfgSplitRatio.value = config.splitRatio;
+        cfgTerminalHeight.value = config.terminalHeight;
+        await restoreWorkspace(rootPath.value, config);
+    }
 });
 
 onBeforeUnmount(() => {
     mq?.removeEventListener("change", onMediaChange);
     resizeCleanup?.();
     window.removeEventListener("keydown", onKeyDown);
-    window.removeEventListener("beforeunload", onBeforeUnload);
-    // Save workspace state on unmount
-    if (rootPath.value) {
-        saveWorkspaceState(rootPath.value, getCurrentWorkspaceState());
-    }
+    saveWorkspaceConfig();
 });
 
 function onKeyDown(e: KeyboardEvent) {
@@ -567,63 +598,49 @@ function onUpdatePane(paneId: string, field: string, value: string) {
 }
 
 // --- Workspace helpers ---
-function getCurrentWorkspaceState(): WorkspaceState {
-    return {
-        paneFiles: panes.value.map(p => p.filePath),
-        activePaneIndex: panes.value.findIndex(p => p.id === activePaneId.value),
-        terminalOpen: terminalOpen.value,
-        terminalCount: terminalSessionCount.value,
-        terminalSplitIndex: terminalSplitIndex.value,
-    };
-}
+async function restoreWorkspace(_path: string, config: LocodeConfig) {
+    terminalOpen.value = config.terminalOpen;
+    terminalSessionCount.value = Math.max(1, config.terminalCount || 1);
+    terminalSplitIndex.value = config.terminalSplitIndex ?? -1;
+    terminalActiveSplitLeft.value = config.terminalActiveSplitLeft ?? 0;
+    terminalFocusedIndex.value = config.terminalFocusedIndex ?? 0;
+    terminalSavedPairs.value = config.terminalSavedPairs ?? [];
+    terminalPanelRef.value?.resetSessions(terminalSessionCount.value, terminalSplitIndex.value, terminalSavedPairs.value, terminalActiveSplitLeft.value, terminalFocusedIndex.value);
 
-async function restoreWorkspace(path: string) {
-    const state = loadWorkspaceState(path);
-    if (state) {
-        terminalOpen.value = state.terminalOpen;
-        terminalSessionCount.value = Math.max(1, state.terminalCount || 1);
-        terminalSplitIndex.value = state.terminalSplitIndex ?? -1;
-        terminalPanelRef.value?.resetSessions(terminalSessionCount.value, terminalSplitIndex.value);
-
-        const files = state.paneFiles || [];
-        if (files.length === 2 && files[0] && files[1]) {
-            panes.value = [
-                { id: "left", filePath: "", code: "", savedCode: "", language: "" },
-                { id: "right", filePath: "", code: "", savedCode: "", language: "" },
-            ];
-            activePaneId.value = state.activePaneIndex === 1 ? "right" : "left";
-            await Promise.all([
-                loadFileIntoPane("left", files[0]),
-                loadFileIntoPane("right", files[1]),
-            ]);
-        } else if (files.length >= 1 && files[0]) {
-            panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
-            activePaneId.value = "main";
-            await loadFileIntoPane("main", files[0]);
-        } else {
-            panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
-            activePaneId.value = "main";
-        }
-    } else {
-        // No saved state — reset to defaults
+    const files = config.paneFiles || [];
+    if (files.length === 2 && files[0] && files[1]) {
+        panes.value = [
+            { id: "left", filePath: "", code: "", savedCode: "", language: "" },
+            { id: "right", filePath: "", code: "", savedCode: "", language: "" },
+        ];
+        activePaneId.value = config.activePaneIndex === 1 ? "right" : "left";
+        await Promise.all([
+            loadFileIntoPane("left", files[0]),
+            loadFileIntoPane("right", files[1]),
+        ]);
+    } else if (files.length >= 1 && files[0]) {
         panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
         activePaneId.value = "main";
-        terminalOpen.value = false;
-        terminalSessionCount.value = 1;
-        terminalSplitIndex.value = -1;
+        await loadFileIntoPane("main", files[0]);
+    } else {
+        panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+        activePaneId.value = "main";
         terminalPanelRef.value?.resetSessions(1, -1);
     }
 }
 
 // --- File selection ---
-function onSelectRoot(path: string) {
-    // Save current workspace state before switching
-    if (rootPath.value) {
-        saveWorkspaceState(rootPath.value, getCurrentWorkspaceState());
-    }
+async function onSelectRoot(path: string) {
+    saveWorkspaceConfig();
+    const config = await loadConfig(path);
+    sidebarWidth.value = config.sidebarWidth;
+    cfgOpenFolders.value = config.openFolders;
+    cfgSkeleton.value = config.skeleton;
+    cfgSplitRatio.value = config.splitRatio;
+    cfgTerminalHeight.value = config.terminalHeight;
     rootPath.value = path;
     localStorage.setItem("locode:rootPath", path);
-    restoreWorkspace(path);
+    restoreWorkspace(path, config);
 }
 
 function onSelectFile(path: string) {
@@ -726,6 +743,7 @@ function doClosePane(paneId: string) {
         pane.savedCode = "";
         pane.language = "";
     }
+    saveWorkspaceConfig();
 }
 
 // --- Dialog handlers ---
@@ -783,6 +801,7 @@ async function loadFileIntoPane(paneId: string, path: string) {
     } finally {
         loadingPaneId.value = null;
     }
+    saveWorkspaceConfig();
 }
 
 let isSaving = false;

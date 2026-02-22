@@ -11,6 +11,7 @@ import "@xterm/xterm/css/xterm.css";
 const props = defineProps<{
     cwd: string;
     active: boolean;
+    focused: boolean;
 }>();
 
 const termContainer = ref<HTMLDivElement | null>(null);
@@ -105,8 +106,8 @@ onMounted(async () => {
     });
     resizeObserver.observe(termContainer.value);
 
-    // Auto-focus if mounted as the active terminal
-    if (props.active) {
+    // Auto-focus only for the explicitly focused terminal
+    if (props.focused) {
         term.focus();
     }
 });
@@ -120,7 +121,6 @@ watch(() => props.active, (active) => {
         nextTick(() => {
             if (!termContainer.value || termContainer.value.offsetHeight === 0) return;
             fitAddon!.fit();
-            term!.focus();
         });
     }
 });

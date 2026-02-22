@@ -36,6 +36,7 @@ async function writeFile(path: string, content: string): Promise<{ message: stri
 async function listDir(path: string): Promise<FileEntry[]> {
     const result: FileEntry[] = [];
     for await (const entry of Deno.readDir(path)) {
+        if (entry.name === ".LoCode") continue;
         const fullPath = path === "/" ? `/${entry.name}` : `${path}/${entry.name}`;
         result.push({ name: entry.name, path: fullPath, type: entry.isDirectory ? "dir" : "file" });
     }
