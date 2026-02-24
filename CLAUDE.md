@@ -13,6 +13,24 @@ L'objectif principal est la vitesse : chargement instantané, interactions fluid
 - **Backend** : Deno (serveur HTTP standalone, port 8080)
 - **Proxy** : Nuxt server route `server/api/[...url].ts` redirige les appels `/api/*` vers le backend Deno
 - **Style** : Design glassmorphism (blur + transparence) avec Tailwind CSS via @nuxt/ui
+- **Desktop** : Electron wrapper (`electron/main.cjs`) qui lance Deno + Nuxt en sous-processus
+
+### Modes de fonctionnement
+
+```
+MODE LOCAL / DESKTOP
+  Electron BrowserWindow → localhost:3000
+    Nuxt Nitro
+      ├─ /api/* ──────────────────► Deno :8080 (file ops)
+      └─ /_terminal (WebSocket) ──► node-pty (shell local)
+
+MODE SSH DISTANT (site sur PC1, Deno sur PC3)
+  Navigateur (PC2) ──► Nuxt frontend (PC1)
+    ├─ /api/* + header X-Backend-Url ──► Deno distant :8080 (file ops)
+    └─ Terminal WS ──────────────────► Deno distant :8080/_terminal (PTY sur PC3)
+```
+
+En mode SSH, le navigateur se connecte directement au Deno distant pour le terminal (WebSocket `/_terminal`), bypassant Nitro/node-pty. L'URL du backend est configurée dans les paramètres (SettingsModal) et persistée dans `localStorage("locode:backendUrl")`.
 
 ## Structure du projet
 
@@ -30,6 +48,10 @@ app/                              # Frontend Nuxt
     UnsavedDialog.vue             # Dialog modal glassmorphism pour modifications non sauvegardées
     Terminal.client.vue           # Composant xterm.js (client-only, PTY via WebSocket)
     TerminalPanel.vue             # Panel multi-terminaux avec sidebar et split
+    SettingsModal.vue             # Modal paramètres (URL backend distant)
+  composables/
+    useApi.ts                     # Fetch centralisé + routage WebSocket (local vs distant)
+    useLocodeConfig.ts            # Config workspace persistée (localStorage)
   plugins/
     monaco.client.ts              # Initialisation des workers Monaco
   middleware/
@@ -38,31 +60,41 @@ app/                              # Frontend Nuxt
     main.css                      # Import Tailwind
 
 backend/
-  server.ts                       # API Deno (read/write/list)
+  server.ts                       # API Deno (read/write/list + /_terminal WebSocket PTY)
 
 server/
-  api/[...url].ts                 # Proxy Nuxt → Deno
+  api/[...url].ts                 # Proxy Nuxt → Deno (supporte header X-Backend-Url)
   routes/
-    _terminal.ts                  # WebSocket handler + node-pty (terminal PTY)
+    _terminal.ts                  # WebSocket handler + node-pty (terminal local)
+
+electron/
+  main.cjs                        # Process principal Electron (spawn Deno + Nuxt, BrowserWindow)
+
+.github/
+  workflows/
+    electron-build.yml            # CI GitHub Actions : builds Windows/Mac/Linux en parallèle
 ```
 
 ## API Backend (Deno)
 
-Le serveur Deno expose 3 endpoints REST :
+Le serveur Deno expose 3 endpoints REST + 1 WebSocket :
 
 | Route | Méthode | Description | Paramètres |
 |-------|---------|-------------|------------|
 | `/list` | GET | Liste le contenu d'un répertoire | `path` (query, défaut: `.`) |
 | `/read` | GET | Lit le contenu d'un fichier | `path` (query) |
 | `/write` | POST | Écrit/sauvegarde un fichier | `{ path, content }` (body JSON) |
+| `/_terminal` | WebSocket | Shell PTY sur la machine Deno | messages JSON (create/input/resize) |
 
-Le frontend appelle ces routes via `/api/list`, `/api/read`, `/api/write` — le proxy Nuxt redirige vers le backend Deno.
+Le frontend appelle les routes REST via `/api/list`, `/api/read`, `/api/write` — le proxy Nuxt redirige vers le backend Deno. En mode distant, le header `X-Backend-Url` indique au proxy l'URL cible.
+
+Le terminal local (mode desktop/web local) passe par `server/routes/_terminal.ts` (node-pty). En mode SSH distant, le terminal se connecte directement au WebSocket `/_terminal` du Deno distant.
 
 ## Commandes
 
 ```bash
-# Démarrer le backend Deno
-deno run --allow-all backend/server.ts
+# Démarrer le backend Deno (mode local)
+deno run --allow-all --unstable-pty backend/server.ts
 
 # Démarrer le frontend Nuxt (dev)
 npm run dev
@@ -72,9 +104,17 @@ npm run build
 
 # Preview du build
 npm run preview
+
+# App Electron (dev — build nuxt puis lance electron)
+npm run electron:dev
+
+# Packager l'app desktop
+npm run electron:build:linux   # AppImage (Linux/WSL)
+npm run electron:build:mac     # DMG (macOS)
+npm run electron:build:win     # NSIS installer (Windows)
 ```
 
-Les deux serveurs doivent tourner simultanément en développement.
+Les deux serveurs doivent tourner simultanément en développement web.
 
 ## Configuration
 
@@ -83,6 +123,26 @@ Fichier `.env` à la racine :
 ```
 DENO_URL="http://localhost"
 DENO_PORT="8080"
+```
+
+## Mode SSH distant — usage
+
+1. Sur la machine distante (PC3) : `deno run --allow-all --unstable-pty backend/server.ts`
+2. Tunnel SSH : `ssh -L 8080:localhost:8080 user@pc3`
+3. Dans LoCode settings (icône engrenage dans le header) : entrer `http://localhost:8080`
+4. L'explorateur de fichiers et l'éditeur opèrent sur le filesystem de PC3
+5. Le terminal spawn les shells sur PC3 via PTY over WebSocket
+
+## CI / Releases
+
+`.github/workflows/electron-build.yml` — déclenché par un tag `v*` ou manuellement :
+- Matrix build : `windows-latest` (exe), `macos-latest` (dmg x64+arm64), `ubuntu-latest` (AppImage)
+- Caches : `node_modules` (par OS + hash lockfile), `.output` Nuxt (partagé cross-platform), binaires Electron
+- La sortie Nuxt (`.output`) est cachée sans `runner.os` dans la clé — platform-indépendant, partagé entre les 3 runners
+- Crée une GitHub Release avec les artefacts via `softprops/action-gh-release`
+
+```bash
+git tag v0.1.0 && git push --tags   # déclenche le workflow
 ```
 
 ## Ce qui a été fait
@@ -130,6 +190,7 @@ DENO_PORT="8080"
 - Error handling sur `loadFile()` et `saveFile()` : try-catch réseau, vérification `res.ok`, mutex anti-spam sur save
 - Gestion du `<head>` via `useHead()` de Nuxt (titre + viewport) au lieu de tags HTML bruts dans le template
 - Polices adaptatives mobile : tailles réduites sur mobile (file tree, file label, boutons, Monaco Editor 12px vs 15px desktop)
+- `"overrides": { "minimatch": ">=10.2.1" }` dans package.json — force la déduplication de toutes les copies imbriquées de minimatch vers la version safe (corrige 24 vulnérabilités npm audit)
 
 ### Tooltip chemin fichier/dossier
 - Survol prolongé (600ms) d'un fichier ou dossier dans le worktree/browse affiche un tooltip flottant avec le chemin complet
@@ -177,6 +238,8 @@ DENO_PORT="8080"
 - Numérotation des terminaux avec réutilisation des gaps (Terminal 3 supprimé → le prochain sera Terminal 3)
 - Numérotation réinitialisée à 1 par workspace
 - IDs terminaux préfixés par `epoch` (`t${Date.now()}-${id}`) pour forcer la re-création des composants Vue au changement de workspace
+- Hauteur du panel terminal auto-sized à l'ouverture pour afficher exactement N lignes : `TerminalPanel.autoSize(targetRows)` mesure la hauteur de cellule réelle via `Terminal.client.getCellHeight()` (utilise `_core._renderService.dimensions.css.cell.height` ou fallback container/rows), puis fixe `panelHeight = targetRows * cellH + 14` (6px handle + 8px padding xterm)
+- `terminalHeight` sauvegardé en config : `null` = jamais redimensionné manuellement → auto-size à l'ouverture ; valeur = hauteur choisie par l'utilisateur → restaurée
 - Resize vertical du panel terminal (min 100px, max 60% viewport, persisté dans `localStorage("locode:terminalHeight")`)
 - Fermeture du dernier terminal → ferme le panel, réouverture crée un Terminal 1 frais
 - Auto-focus du terminal à la création : `Terminal.client.vue` appelle `term.focus()` à la fin de `onMounted` si `props.active` est `true` (corrige le focus manquant sur les nouveaux terminaux)
@@ -216,13 +279,30 @@ DENO_PORT="8080"
 - `app/plugins/monaco.client.ts` : imports directs des web workers Monaco (`editor.worker`, `json.worker`, `css.worker`, `html.worker`, `ts.worker`)
 - `self.MonacoEnvironment.getWorker` défini pour router chaque langage vers le bon worker — élimine les erreurs console "You must define MonacoEnvironment.getWorkerUrl"
 
+### App desktop Electron
+- `electron/main.cjs` (CommonJS, `.cjs` pour éviter le conflit avec `"type": "module"`) : spawn Deno backend + Nuxt server en sous-processus, attend que le port 3000 soit prêt via `net.createConnection`, crée `BrowserWindow` sur `http://127.0.0.1:3000`
+- Binaire Deno résolu dynamiquement : `process.resourcesPath/deno-bin/deno[.exe]` (packagé) ou `node_modules/deno/deno[.exe]` (dev)
+- `extraResources` dans `package.json` copie `node_modules/deno/deno` (ou `.exe`) vers `deno-bin/` dans le package final — filtre `["deno", "deno.exe"]` pour capturer la bonne plateforme
+- `ELECTRON_CACHE` et `ELECTRON_BUILDER_CACHE` pointés sur des chemins workspace-relatifs dans le workflow CI pour un cache cross-platform cohérent
+- Liens externes ouverts dans le navigateur système via `setWindowOpenHandler` + `shell.openExternal`
+
+### Mode SSH distant
+- `app/composables/useApi.ts` : composable centralisé `useApi()` exposant `apiFetch(path, options)` (ajoute le header `X-Backend-Url` si une URL distante est configurée) et `getWsUrl()` (retourne l'URL WebSocket du Deno distant ou le proxy local)
+- `app/components/SettingsModal.vue` : modal glassmorphism avec champ URL backend, persistance dans `localStorage("locode:backendUrl")`, hint SSH tunnel
+- `server/api/[...url].ts` : lit le header `X-Backend-Url` pour rediriger vers le backend distant au lieu de l'env local
+- `backend/server.ts` : endpoint `/_terminal` WebSocket avec `Deno.openPty()` (`--unstable-pty`) — spawn shell sur la machine Deno, stream PTY → WebSocket (messages JSON create/input/resize/output/exit), CORS headers sur toutes les réponses
+- `Terminal.client.vue` : connexion WebSocket via `useApi().getWsUrl()` (local ou distant selon config)
+- Icône engrenage dans le header de `index.vue` avec indicateur visuel `.btn-remote` quand un backend distant est actif
+
 ## Stack technique
 
-- **Nuxt** 4.1.0
-- **Vue** 3.5.20
+- **Nuxt** 4.x
+- **Vue** 3.5.x
 - **Monaco Editor** 0.53.0
-- **Deno** 2.4.4 (backend)
-- **@nuxt/ui** 3.3.3 + **@nuxt/ui-pro** 3.3.3
+- **Deno** 2.4.x (backend)
+- **@nuxt/ui** 3.3.x + **@nuxt/ui-pro** 3.3.x
 - **Tailwind CSS** (via @nuxt/ui)
 - **@xterm/xterm** 6.0.0 + **@xterm/addon-fit** 0.11.0 + **@xterm/addon-web-links** 0.12.0
-- **node-pty** 1.1.0 (PTY backend pour le terminal)
+- **node-pty** 1.1.0 (PTY backend pour le terminal local)
+- **Electron** 36.x (desktop wrapper)
+- **electron-builder** 26.x (packaging installateurs)
