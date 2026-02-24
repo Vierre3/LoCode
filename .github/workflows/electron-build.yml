@@ -17,9 +17,9 @@ jobs:
           - os: macos-latest
             script: electron:build:mac
             artifact: dist/*.dmg
-          # - os: ubuntu-latest
-          #   script: electron:build:linux
-          #   artifact: dist/*.AppImage
+          - os: ubuntu-latest
+            script: electron:build:linux
+            artifact: dist/*.AppImage
 
     runs-on: ${{ matrix.os }}
 
