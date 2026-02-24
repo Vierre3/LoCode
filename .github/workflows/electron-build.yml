@@ -1,4 +1,5 @@
 name: Build Electron App
+run-name: Vuilding release ${{ github.ref_name }} ✘
 
 on:
   push:
@@ -31,13 +32,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+
+      # Cache node_modules keyed on the lockfile — skips npm install entirely on hit
+      - uses: actions/cache@v4
+        id: cache-deps
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
 
       - name: Install Python setuptools (node-gyp needs distutils, removed in Python 3.12)
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: pip3 install setuptools --break-system-packages
 
       - name: Install dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: npm ci
+
+      # On cache hit npm ci (and its postinstall: nuxt prepare) was skipped — run it manually
+      - name: Prepare Nuxt types
+        if: steps.cache-deps.outputs.cache-hit == 'true'
+        run: npx nuxt prepare
+
+      # Cache the Electron and electron-builder download caches (~100-200 MB per arch)
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ${{ env.LOCALAPPDATA }}\electron\Cache
+            ${{ env.LOCALAPPDATA }}\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
 
       - name: Build
         run: npm run ${{ matrix.script }}
