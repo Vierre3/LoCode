@@ -33,35 +33,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # npm tarball cache (~/.npm) — speeds up downloads inside npm ci
+      # Caches ~/.npm tarballs — speeds up npm ci downloads without the
+      # overhead of restoring 1.6 GB of node_modules from cache
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
-      # Cache node_modules — on hit, skips npm ci entirely (saves ~1:30)
-      - uses: actions/cache@v4
-        id: cache-deps
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
-
       - name: Install Python setuptools (node-gyp needs distutils, removed in Python 3.12)
-        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: pip3 install setuptools --break-system-packages
 
       - name: Install dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: npm ci
 
-      # On cache hit, npm ci (and its postinstall: nuxt prepare) was skipped
-      - name: Prepare Nuxt types
-        if: steps.cache-deps.outputs.cache-hit == 'true'
-        run: npx nuxt prepare
-
-      # Nuxt build cache (platform-independent — shared across all 3 OS runners)
-      # Key has no runner.os: .output is pure JS, identical on every platform.
-      # Whichever runner builds first, the other two restore from cache and skip.
+      # Nuxt build output is only ~17 MB and platform-independent.
+      # Key has no runner.os: whichever runner builds first, the other two restore and skip.
       - uses: actions/cache@v4
         id: cache-nuxt
         with:
@@ -72,7 +58,7 @@ jobs:
         if: steps.cache-nuxt.outputs.cache-hit != 'true'
         run: npx nuxt build
 
-      # Electron binary + electron-builder tools cache
+      # Electron binary + electron-builder tools (~200 MB per platform)
       - uses: actions/cache@v4
         with:
           path: |
