@@ -10,7 +10,7 @@ const root = isPacked ? process.resourcesPath : path.join(__dirname, "..");
 // Deno binary: shipped via the `deno` npm package
 const denoBin = isPacked
     ? path.join(process.resourcesPath, "deno-bin", process.platform === "win32" ? "deno.exe" : "deno")
-    : path.join(root, "node_modules", "deno", "bin", process.platform === "win32" ? "deno.exe" : "deno");
+    : path.join(root, "node_modules", "deno", process.platform === "win32" ? "deno.exe" : "deno");
 
 const backendScript = path.join(root, "backend", "server.ts");
 const nuxtEntry = path.join(root, ".output", "server", "index.mjs");

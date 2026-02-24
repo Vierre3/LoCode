@@ -11,10 +11,10 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "electron:dev": "nuxt build && electron .",
-    "electron:build:linux": "nuxt build && electron-builder --linux",
-    "electron:build:mac": "nuxt build && electron-builder --mac",
-    "electron:build:win": "nuxt build && electron-builder --win",
-    "electron:build": "nuxt build && electron-builder --mac --win"
+    "electron:build:linux": "nuxt build && electron-builder --linux --publish never",
+    "electron:build:mac": "nuxt build && electron-builder --mac --publish never",
+    "electron:build:win": "nuxt build && electron-builder --win --publish never",
+    "electron:build": "nuxt build && electron-builder --mac --win --publish never"
   },
   "dependencies": {
     "@nuxt/fonts": "^0.11.4",
@@ -50,9 +50,9 @@
     ],
     "extraResources": [
       {
-        "from": "node_modules/deno/bin/",
+        "from": "node_modules/deno/",
         "to": "deno-bin/",
-        "filter": ["**/*"]
+        "filter": ["deno", "deno.exe"]
       }
     ],
     "mac": {
