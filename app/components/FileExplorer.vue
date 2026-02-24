@@ -140,6 +140,7 @@
 <script setup lang="ts">
 import type { SkeletonNode } from '~/composables/useLocodeConfig'
 import { DEFAULT_SKELETON } from '~/composables/useLocodeConfig'
+const { apiFetch } = useApi()
 
 const props = defineProps<{
     openFiles: string[];
@@ -209,7 +210,7 @@ provide("hideTooltip", () => {
 
 async function loadTree(path: string, dirsOnly = false): Promise<any[]> {
     folder.value = path;
-    const res = await fetch("/api/list?path=" + path);
+    const res = await apiFetch("/list?path=" + path);
     let items = await res.json();
     if (dirsOnly) items = items.filter((n: any) => n.type === "dir");
     return items;

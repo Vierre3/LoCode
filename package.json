@@ -1,13 +1,20 @@
 {
-  "name": "nuxt-app",
+  "name": "locode",
+  "version": "0.1.0",
   "type": "module",
   "private": true,
+  "main": "electron/main.cjs",
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "electron:dev": "nuxt build && electron .",
+    "electron:build:linux": "nuxt build && electron-builder --linux",
+    "electron:build:mac": "nuxt build && electron-builder --mac",
+    "electron:build:win": "nuxt build && electron-builder --win",
+    "electron:build": "nuxt build && electron-builder --mac --win"
   },
   "dependencies": {
     "@nuxt/fonts": "^0.11.4",
@@ -28,6 +35,39 @@
   },
   "devDependencies": {
     "@nuxt/devtools": "^2.6.3",
-    "baseline-browser-mapping": "^2.9.19"
+    "baseline-browser-mapping": "^2.9.19",
+    "electron": "^36.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "dev.locode.app",
+    "productName": "LoCode",
+    "asar": true,
+    "files": [
+      "electron/**/*",
+      ".output/**/*",
+      "backend/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/deno/bin/",
+        "to": "deno-bin/",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "linux": {
+      "target": [{ "target": "AppImage", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

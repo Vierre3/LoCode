@@ -45,6 +45,9 @@
                     <button @click="saveActivePane" class="btn"
                         :class="{ 'btn-press': savePressing, 'btn-success': saveSuccess }"
                         :disabled="!activePane?.filePath">Save</button>
+                    <button @click="showSettings = true" class="btn settings-btn"
+                        :class="{ 'btn-remote': isRemote }"
+                        title="Settings — remote backend">⚙</button>
                     <img src="/logo.svg" alt="LoCode" class="logo logo-btn" :class="{ active: terminalOpen }"
                         @click="terminalOpen ? closeTerminal() : openTerminal()" />
                 </div>
@@ -72,6 +75,10 @@
 
         <UnsavedDialog :show="showUnsavedDialog" :fileName="unsavedFileName"
             @save="onDialogSave" @discard="onDialogDiscard" @cancel="showUnsavedDialog = false" />
+
+        <SettingsModal :show="showSettings"
+            @close="showSettings = false"
+            @saved="isRemote = !!getStoredBackendUrl()" />
     </div>
 </template>
 
@@ -197,6 +204,16 @@
 .btn-press {
     transform: scale(0.92) !important;
     border-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.settings-btn {
+    font-size: 1rem;
+    padding: 4px 7px;
+}
+
+.btn-remote {
+    border-color: rgba(100, 220, 100, 0.5) !important;
+    color: rgba(100, 220, 100, 0.9) !important;
 }
 
 .logo {
@@ -366,6 +383,10 @@ import { useLocodeConfig } from '~/composables/useLocodeConfig';
 import type { LocodeConfig, SkeletonNode } from '~/composables/useLocodeConfig';
 
 const { loadConfig, saveConfig } = useLocodeConfig();
+const { apiFetch, getStoredBackendUrl } = useApi();
+
+const showSettings = ref(false);
+const isRemote = import.meta.client ? ref(!!getStoredBackendUrl()) : ref(false);
 
 // --- Config state (loaded from .LoCode) ---
 const cfgOpenFolders = ref<string[]>([]);
@@ -783,7 +804,7 @@ async function loadFileIntoPane(paneId: string, path: string) {
     loadingPaneId.value = paneId;
 
     try {
-        const res = await fetch("/api/read?path=" + path);
+        const res = await apiFetch("/read?path=" + path);
         if (!res.ok) {
             const text = await res.text();
             pane.code = text;
@@ -811,7 +832,7 @@ async function savePaneFile(paneId: string) {
     if (!pane || !pane.filePath || isSaving) return;
     isSaving = true;
     try {
-        const res = await fetch("/api/write", {
+        const res = await apiFetch("/write", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ path: pane.filePath, content: pane.code }),

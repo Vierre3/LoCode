@@ -44,13 +44,15 @@ const DEFAULTS: LocodeConfig = {
 const configCache = new Map<string, LocodeConfig>()
 
 export function useLocodeConfig() {
+    const { apiFetch } = useApi()
+
     function configPath(rootPath: string) {
         return rootPath + "/.LoCode"
     }
 
     async function loadConfig(rootPath: string): Promise<LocodeConfig> {
         try {
-            const res = await fetch("/api/read?path=" + encodeURIComponent(configPath(rootPath)))
+            const res = await apiFetch("/read?path=" + encodeURIComponent(configPath(rootPath)))
             if (res.ok) {
                 const text = await res.text()
                 const parsed = JSON.parse(text)
@@ -71,7 +73,7 @@ export function useLocodeConfig() {
         // Update cache synchronously so concurrent calls see the latest state
         configCache.set(rootPath, merged)
         try {
-            await fetch("/api/write", {
+            await apiFetch("/write", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
