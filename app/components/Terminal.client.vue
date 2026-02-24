@@ -47,9 +47,10 @@ onMounted(async () => {
     await nextTick();
     fitAddon.fit();
 
-    // WebSocket connection
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    ws = new WebSocket(`${protocol}//${window.location.host}/_terminal`);
+    // WebSocket connection — local mode uses Nitro /_terminal (node-pty),
+    // remote SSH mode connects directly to the Deno backend /_terminal (Deno PTY)
+    const { getWsUrl } = useApi();
+    ws = new WebSocket(getWsUrl());
 
     ws.onopen = () => {
         ws!.send(JSON.stringify({
