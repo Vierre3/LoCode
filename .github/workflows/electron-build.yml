@@ -33,29 +33,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # npm tarball cache (~300 MB compressed) — speeds up npm ci downloads
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      # --- node_modules cache (skips npm ci + native rebuild on hit) ---
-      - uses: actions/cache@v4
-        id: cache-deps
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          cache: 'npm'
 
       - name: Install Python setuptools (node-gyp needs distutils, removed in Python 3.12)
-        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: pip3 install setuptools --break-system-packages
 
       - name: Install dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: npm ci
-
-      # On cache hit, npm ci (and postinstall: nuxt prepare) was skipped
-      - name: Prepare Nuxt types
-        if: steps.cache-deps.outputs.cache-hit == 'true'
-        run: npx nuxt prepare
 
       # --- Nuxt build cache (platform-independent — shared across all 3 OS runners) ---
       # Key does NOT include runner.os: .output is pure JS and works on any platform.
