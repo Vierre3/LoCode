@@ -5,6 +5,7 @@
 .nitro
 .cache
 dist
+squashfs-root
 
 # Node dependencies
 node_modules
