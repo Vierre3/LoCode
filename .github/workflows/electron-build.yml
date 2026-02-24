@@ -31,9 +31,9 @@ jobs:
     strategy:
       matrix:
         include:
-          # - os: windows-latest
-          #   platform: win
-          #   artifact: dist/*.exe
+          - os: windows-latest
+            platform: win
+            artifact: dist/*.exe
           - os: macos-latest
             platform: mac
             artifact: dist/*.dmg
@@ -64,6 +64,7 @@ jobs:
         with:
           path: node_modules
           key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-node-modules-
 
       - name: Install Python setuptools (node-gyp needs distutils, removed in Python 3.12)
         if: steps.cache-deps.outputs.cache-hit != 'true'
