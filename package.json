@@ -47,6 +47,7 @@
     "productName": "LoCode",
     "asar": false,
     "files": [
+      "!node_modules",
       "electron/**/*",
       ".output/**/*",
       "backend/**/*"
