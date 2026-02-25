@@ -32,8 +32,9 @@ const denoBin = isPacked
 const backendScript = path.join(filesRoot, "backend", "server.ts");
 const nuxtEntry = path.join(filesRoot, ".output", "server", "index.mjs");
 
-const DENO_PORT = "8080";
-const NUXT_PORT = "3000";
+// High ports to avoid conflicts with common dev servers (3000, 8080, etc.)
+const DENO_PORT = "52141";
+const NUXT_PORT = "52140";
 
 let denoProc = null;
 let nuxtProc = null;
@@ -64,7 +65,7 @@ function startDeno() {
     log("[deno] spawning...");
     denoProc = spawn(
         denoBin,
-        ["run", "--allow-all", "--unstable-pty", backendScript],
+        ["run", "--allow-all", backendScript],
         {
             cwd: filesRoot,
             env: { ...process.env, DENO_PORT },
@@ -144,9 +145,6 @@ function createWindow() {
         log(`[window:console] [${level}] ${msg}`);
     });
 
-    // Open DevTools for debugging (remove once black screen is resolved)
-    win.webContents.openDevTools();
-
     win.loadURL(`http://127.0.0.1:${NUXT_PORT}`);
 
     // Open external links in the system browser, not in the Electron window
@@ -182,7 +180,30 @@ app.on("second-instance", () => {
     }
 });
 
+/** Check that a port is free before we try to bind it. */
+function ensurePortFree(port) {
+    return new Promise((resolve, reject) => {
+        const srv = net.createServer();
+        srv.once("error", (err) => {
+            reject(new Error(`Port ${port} is already in use (${err.code})`));
+        });
+        srv.listen({ port: Number(port), host: "127.0.0.1" }, () => {
+            srv.close(() => resolve());
+        });
+    });
+}
+
 app.whenReady().then(async () => {
+    // Make sure our ports are free before starting child processes
+    try {
+        await ensurePortFree(NUXT_PORT);
+        await ensurePortFree(DENO_PORT);
+    } catch (err) {
+        log(`[main] ${err.message}`);
+        showError(err.message + "\n\nAnother application may be using this port.\nPlease close it and relaunch LoCode.");
+        return;
+    }
+
     startDeno();
     startNuxt();
 
