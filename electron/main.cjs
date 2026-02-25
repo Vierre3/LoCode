@@ -66,6 +66,7 @@ function startDeno() {
         denoBin,
         ["run", "--allow-all", "--unstable-pty", backendScript],
         {
+            cwd: filesRoot,
             env: { ...process.env, DENO_PORT },
             stdio: ["ignore", "pipe", "pipe"],
         }
@@ -82,6 +83,7 @@ function startNuxt() {
         process.execPath, // the Electron binary, used as Node.js via ELECTRON_RUN_AS_NODE
         [nuxtEntry],
         {
+            cwd: filesRoot,
             env: {
                 ...process.env,
                 ELECTRON_RUN_AS_NODE: "1", // run as plain Node.js, not as Electron app
@@ -130,6 +132,20 @@ function createWindow() {
             contextIsolation: true,
         },
     });
+
+    // Log page load events for debugging
+    win.webContents.on("did-fail-load", (e, code, desc, url) => {
+        log(`[window] did-fail-load: code=${code} desc=${desc} url=${url}`);
+    });
+    win.webContents.on("did-finish-load", () => {
+        log("[window] did-finish-load");
+    });
+    win.webContents.on("console-message", (e, level, msg, line, sourceId) => {
+        log(`[window:console] [${level}] ${msg}`);
+    });
+
+    // Open DevTools for debugging (remove once black screen is resolved)
+    win.webContents.openDevTools();
 
     win.loadURL(`http://127.0.0.1:${NUXT_PORT}`);
 

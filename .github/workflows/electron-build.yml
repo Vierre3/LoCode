@@ -43,11 +43,6 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    env:
-      # Workspace-relative paths work identically on all platforms
-      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
-
     steps:
       - uses: actions/checkout@v6
 
