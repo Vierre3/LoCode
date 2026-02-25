@@ -12,18 +12,24 @@ if (!app.requestSingleInstanceLock()) {
 
 const isPacked = app.isPackaged;
 
-// __dirname resolves correctly in both dev and packaged (asar-off) mode:
-//   dev:    <project>/electron  → root = <project>
-//   packed: <app>/Resources/app/electron → root = <app>/Resources/app
+// In dev:    __dirname = <project>/electron → root = <project>
+// In packed: __dirname = <app>/Resources/app.asar/electron → root = app.asar
 const root = path.join(__dirname, "..");
+
+// Files in asarUnpack live at app.asar.unpacked/ on disk.
+// External binaries (Deno) can't read from inside the asar archive,
+// so we need the real filesystem path for spawned scripts.
+const filesRoot = isPacked
+    ? root.replace("app.asar", "app.asar.unpacked")
+    : root;
 
 // Deno binary is an extraResource — lives outside the app folder in both modes
 const denoBin = isPacked
     ? path.join(process.resourcesPath, "deno-bin", process.platform === "win32" ? "deno.exe" : "deno")
     : path.join(root, "node_modules", "deno", process.platform === "win32" ? "deno.exe" : "deno");
 
-const backendScript = path.join(root, "backend", "server.ts");
-const nuxtEntry = path.join(root, ".output", "server", "index.mjs");
+const backendScript = path.join(filesRoot, "backend", "server.ts");
+const nuxtEntry = path.join(filesRoot, ".output", "server", "index.mjs");
 
 const DENO_PORT = "8080";
 const NUXT_PORT = "3000";
