@@ -52,11 +52,12 @@ function startDeno() {
 
 function startNuxt() {
     nuxtProc = spawn(
-        process.execPath, // the Node.js that shipped with Electron
+        process.execPath, // the Electron binary, used as Node.js via ELECTRON_RUN_AS_NODE
         [nuxtEntry],
         {
             env: {
                 ...process.env,
+                ELECTRON_RUN_AS_NODE: "1", // run as plain Node.js, not as Electron app
                 PORT: NUXT_PORT,
                 HOST: "127.0.0.1",
                 NODE_ENV: "production",
