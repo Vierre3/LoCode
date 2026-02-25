@@ -3,6 +3,7 @@ const { app, BrowserWindow, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
+const fs = require("fs");
 
 // Prevent multiple instances — second launch focuses the existing window instead
 if (!app.requestSingleInstanceLock()) {
@@ -38,19 +39,45 @@ let denoProc = null;
 let nuxtProc = null;
 let win = null;
 
+// ── Logging ──────────────────────────────────────────────────────────
+const logPath = path.join(app.getPath("userData"), "locode.log");
+const logStream = fs.createWriteStream(logPath, { flags: "w" }); // overwrite each launch
+
+function log(msg) {
+    const line = `[${new Date().toISOString()}] ${msg}`;
+    logStream.write(line + "\n");
+    console.log(line);
+}
+
+log(`LoCode starting — packed=${isPacked}`);
+log(`root       = ${root}`);
+log(`filesRoot  = ${filesRoot}`);
+log(`denoBin    = ${denoBin}`);
+log(`backend    = ${backendScript}`);
+log(`nuxtEntry  = ${nuxtEntry}`);
+log(`deno exists  = ${fs.existsSync(denoBin)}`);
+log(`backend exists = ${fs.existsSync(backendScript)}`);
+log(`nuxt exists    = ${fs.existsSync(nuxtEntry)}`);
+
+// ── Child processes ──────────────────────────────────────────────────
 function startDeno() {
+    log("[deno] spawning...");
     denoProc = spawn(
         denoBin,
         ["run", "--allow-all", "--unstable-pty", backendScript],
         {
             env: { ...process.env, DENO_PORT },
-            stdio: "inherit",
+            stdio: ["ignore", "pipe", "pipe"],
         }
     );
-    denoProc.on("error", (err) => console.error("[deno]", err.message));
+    denoProc.stdout.on("data", (d) => log(`[deno:out] ${d.toString().trimEnd()}`));
+    denoProc.stderr.on("data", (d) => log(`[deno:err] ${d.toString().trimEnd()}`));
+    denoProc.on("error", (err) => log(`[deno:error] ${err.message}`));
+    denoProc.on("exit", (code) => log(`[deno:exit] code=${code}`));
 }
 
 function startNuxt() {
+    log("[nuxt] spawning...");
     nuxtProc = spawn(
         process.execPath, // the Electron binary, used as Node.js via ELECTRON_RUN_AS_NODE
         [nuxtEntry],
@@ -64,10 +91,13 @@ function startNuxt() {
                 DENO_URL: "http://localhost",
                 DENO_PORT,
             },
-            stdio: "inherit",
+            stdio: ["ignore", "pipe", "pipe"],
         }
     );
-    nuxtProc.on("error", (err) => console.error("[nuxt]", err.message));
+    nuxtProc.stdout.on("data", (d) => log(`[nuxt:out] ${d.toString().trimEnd()}`));
+    nuxtProc.stderr.on("data", (d) => log(`[nuxt:err] ${d.toString().trimEnd()}`));
+    nuxtProc.on("error", (err) => log(`[nuxt:error] ${err.message}`));
+    nuxtProc.on("exit", (code) => log(`[nuxt:exit] code=${code}`));
 }
 
 /** Poll until TCP port is accepting connections, then resolve. */
@@ -112,6 +142,22 @@ function createWindow() {
     win.on("closed", () => { win = null; });
 }
 
+function showError(message) {
+    win = new BrowserWindow({
+        width: 700,
+        height: 500,
+        title: "LoCode — Error",
+        backgroundColor: "#0d1117",
+    });
+    const html = `<html><body style="background:#0d1117;color:#f0f0f0;font-family:monospace;padding:2em">
+        <h2 style="color:#ff6b6b">LoCode failed to start</h2>
+        <pre style="white-space:pre-wrap;font-size:13px">${message.replace(/</g, "&lt;")}</pre>
+        <p style="color:#888;margin-top:2em">Log file: ${logPath.replace(/</g, "&lt;")}</p>
+        </body></html>`;
+    win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    win.on("closed", () => { win = null; });
+}
+
 app.on("second-instance", () => {
     // A second instance tried to launch — focus the existing window instead
     if (win) {
@@ -126,11 +172,15 @@ app.whenReady().then(async () => {
 
     try {
         await waitForPort(NUXT_PORT);
+        log("[main] Nuxt server is ready, creating window");
+        createWindow();
     } catch (err) {
-        console.error("Nuxt server did not start in time:", err.message);
+        log(`[main] Nuxt server did not start: ${err.message}`);
+        // Read the log so far and show it in an error window
+        logStream.end();
+        const logContent = fs.readFileSync(logPath, "utf-8");
+        showError(logContent);
     }
-
-    createWindow();
 
     app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
