@@ -96,12 +96,6 @@ jobs:
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
           restore-keys: ${{ runner.os }}-electron-
 
-      # macOS arm64 requires ad-hoc code signing which opens every file individually.
-      # Raise the file descriptor limit so it doesn't EMFILE on large node_modules.
-      - name: Raise file descriptor limit
-        if: runner.os == 'macOS'
-        run: ulimit -n 65536
-
       # On main: --dir downloads the electron binary + prebuilts, skips installer creation (~1 min).
       # On tag:  full build produces the installable artifact (~3:45).
       - name: Package with electron-builder
