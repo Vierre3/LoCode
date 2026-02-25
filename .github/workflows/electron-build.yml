@@ -31,17 +31,17 @@ jobs:
     strategy:
       matrix:
         include:
-          # - os: windows-latest
-          #   platform: win
-          #   artifact: .exe
-          - os: macos-latest
+          - os: windows
+            platform: win
+            artifact: .exe
+          - os: macos
             platform: mac
             artifact: .dmg
-          # - os: ubuntu-latest
-          #   platform: linux
-          #   artifact: .AppImage
+          - os: ubuntu
+            platform: linux
+            artifact: .AppImage
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}-latest
 
     steps:
       - uses: actions/checkout@v6
