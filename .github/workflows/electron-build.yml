@@ -4,7 +4,7 @@ run-name: ${{ startsWith(github.ref, 'refs/tags/') && format('Release {0}', gith
 on:
   push:
     tags:
-      - 'v*'           # full build + release
+      - v*             # full build + release
     branches:
       - main           # cache warming only — no packaging
   workflow_dispatch:
@@ -33,13 +33,13 @@ jobs:
         include:
           # - os: windows-latest
           #   platform: win
-          #   artifact: dist/*.exe
+          #   artifact: .exe
           - os: macos-latest
             platform: mac
-            artifact: dist/*.dmg
+            artifact: .dmg
           # - os: ubuntu-latest
           #   platform: linux
-          #   artifact: dist/*.AppImage
+          #   artifact: .AppImage
 
     runs-on: ${{ matrix.os }}
 
@@ -110,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LoCode-${{ matrix.os }}
-          path: ${{ matrix.artifact }}
+          path: dist/*${{ matrix.artifact }}
           if-no-files-found: error
 
 
