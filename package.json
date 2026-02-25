@@ -46,13 +46,15 @@
     "asar": true,
     "asarUnpack": [
       "backend/**/*",
-      ".output/**/*"
+      ".output/**/*",
+      "node_modules/node-pty/**/*"
     ],
     "files": [
       "!node_modules",
       "electron/**/*",
       ".output/**/*",
-      "backend/**/*"
+      "backend/**/*",
+      "node_modules/node-pty/**/*"
     ],
     "extraResources": [
       {
