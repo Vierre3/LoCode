@@ -31,7 +31,12 @@
     "nuxt-lucide-icons": "^1.0.5",
     "nuxt-svgo": "^4.2.6",
     "vue": "^3.5.20",
-    "vue-router": "^4.5.1"
+    "vue-router": "^4.5.1",
+    "@emnapi/core": "^1.8.0",
+    "@emnapi/runtime": "^1.8.0",
+    "@emnapi/wasi-threads": "^1.1.0",
+    "@napi-rs/wasm-runtime": "^1.1.0",
+    "@tybys/wasm-util": "^0.10.0"
   },
   "devDependencies": {
     "@nuxt/devtools": "^2.6.3",
@@ -40,7 +45,8 @@
     "electron-builder": "^26.8.1"
   },
   "overrides": {
-    "minimatch": ">=10.2.1"
+    "minimatch": ">=10.2.1",
+    "citty": "^0.2.1"
   },
   "build": {
     "appId": "dev.locode.app",
