@@ -32,9 +32,8 @@ const denoBin = isPacked
 const backendScript = path.join(filesRoot, "backend", "server.ts");
 const nuxtEntry = path.join(filesRoot, ".output", "server", "index.mjs");
 
-// High ports to avoid conflicts with common dev servers (3000, 8080, etc.)
-const DENO_PORT = "52141";
-const NUXT_PORT = "52140";
+let denoPort = null;
+let nuxtPort = null;
 
 let denoProc = null;
 let nuxtProc = null;
@@ -68,7 +67,7 @@ function startDeno() {
         ["run", "--allow-all", backendScript],
         {
             cwd: filesRoot,
-            env: { ...process.env, DENO_PORT },
+            env: { ...process.env, DENO_PORT: denoPort },
             stdio: ["ignore", "pipe", "pipe"],
         }
     );
@@ -88,11 +87,11 @@ function startNuxt() {
             env: {
                 ...process.env,
                 ELECTRON_RUN_AS_NODE: "1", // run as plain Node.js, not as Electron app
-                PORT: NUXT_PORT,
+                PORT: nuxtPort,
                 HOST: "127.0.0.1",
                 NODE_ENV: "production",
                 DENO_URL: "http://localhost",
-                DENO_PORT,
+                DENO_PORT: denoPort,
             },
             stdio: ["ignore", "pipe", "pipe"],
         }
@@ -145,7 +144,7 @@ function createWindow() {
         log(`[window:console] [${level}] ${msg}`);
     });
 
-    win.loadURL(`http://127.0.0.1:${NUXT_PORT}`);
+    win.loadURL(`http://127.0.0.1:${nuxtPort}`);
 
     // Open external links in the system browser, not in the Electron window
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -180,35 +179,29 @@ app.on("second-instance", () => {
     }
 });
 
-/** Check that a port is free before we try to bind it. */
-function ensurePortFree(port) {
+/** Ask the OS for a free port by binding to port 0, then release it. */
+function getFreePort() {
     return new Promise((resolve, reject) => {
         const srv = net.createServer();
-        srv.once("error", (err) => {
-            reject(new Error(`Port ${port} is already in use (${err.code})`));
-        });
-        srv.listen({ port: Number(port), host: "127.0.0.1" }, () => {
-            srv.close(() => resolve());
+        srv.once("error", reject);
+        srv.listen({ port: 0, host: "127.0.0.1" }, () => {
+            const port = String(srv.address().port);
+            srv.close(() => resolve(port));
         });
     });
 }
 
 app.whenReady().then(async () => {
-    // Make sure our ports are free before starting child processes
-    try {
-        await ensurePortFree(NUXT_PORT);
-        await ensurePortFree(DENO_PORT);
-    } catch (err) {
-        log(`[main] ${err.message}`);
-        showError(err.message + "\n\nAnother application may be using this port.\nPlease close it and relaunch LoCode.");
-        return;
-    }
+    // Let the OS assign guaranteed-free ports
+    nuxtPort = await getFreePort();
+    denoPort = await getFreePort();
+    log(`[main] Assigned ports: nuxt=${nuxtPort}, deno=${denoPort}`);
 
     startDeno();
     startNuxt();
 
     try {
-        await waitForPort(NUXT_PORT);
+        await waitForPort(nuxtPort);
         log("[main] Nuxt server is ready, creating window");
         createWindow();
     } catch (err) {
