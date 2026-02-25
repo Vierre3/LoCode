@@ -43,7 +43,11 @@
   "build": {
     "appId": "dev.locode.app",
     "productName": "LoCode",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "backend/**/*",
+      ".output/**/*"
+    ],
     "files": [
       "!node_modules",
       "electron/**/*",
