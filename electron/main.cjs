@@ -4,10 +4,20 @@ const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 
-const isPacked = app.isPackaged;
-const root = isPacked ? process.resourcesPath : path.join(__dirname, "..");
+// Prevent multiple instances — second launch focuses the existing window instead
+if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    process.exit(0);
+}
 
-// Deno binary: shipped via the `deno` npm package
+const isPacked = app.isPackaged;
+
+// __dirname resolves correctly in both dev and packaged (asar-off) mode:
+//   dev:    <project>/electron  → root = <project>
+//   packed: <app>/Resources/app/electron → root = <app>/Resources/app
+const root = path.join(__dirname, "..");
+
+// Deno binary is an extraResource — lives outside the app folder in both modes
 const denoBin = isPacked
     ? path.join(process.resourcesPath, "deno-bin", process.platform === "win32" ? "deno.exe" : "deno")
     : path.join(root, "node_modules", "deno", process.platform === "win32" ? "deno.exe" : "deno");
@@ -95,12 +105,19 @@ function createWindow() {
     win.on("closed", () => { win = null; });
 }
 
+app.on("second-instance", () => {
+    // A second instance tried to launch — focus the existing window instead
+    if (win) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+    }
+});
+
 app.whenReady().then(async () => {
     startDeno();
     startNuxt();
 
     try {
-        // Wait for the Nuxt server to be ready before showing the window
         await waitForPort(NUXT_PORT);
     } catch (err) {
         console.error("Nuxt server did not start in time:", err.message);
