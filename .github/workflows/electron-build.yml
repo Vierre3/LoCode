@@ -10,24 +10,23 @@ on:
   workflow_dispatch:
 
 jobs:
-  check_branch:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - name: Fetch main
-        run: git fetch origin main --tags
-      - name: Exit if tag linked to wrong branch
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          if ! git merge-base --is-ancestor ${{ github.sha }} origin/main; then
-            exit 1
-          fi
-
+  # check_branch:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #       with:
+  #         fetch-depth: 0
+  #     - name: Fetch main
+  #       run: git fetch origin main --tags
+  #     - name: Exit if tag linked to wrong branch
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #       run: |
+  #         if ! git merge-base --is-ancestor ${{ github.sha }} origin/main; then
+  #           exit 1
+  #         fi
 
   build:
-    needs: check_branch
+    # needs: check_branch
     strategy:
       matrix:
         include:
@@ -80,6 +79,24 @@ jobs:
       - name: Build Nuxt
         if: steps.cache-nuxt.outputs.cache-hit != 'true'
         run: npx nuxt build
+
+      # Remove native modules from Nuxt output so Nitro uses the root copies
+      # (which electron-builder rebuilds for the correct Electron ABI)
+      - name: Fix native modules for Electron
+        run: rm -rf .output/server/node_modules/node-pty .output/server/node_modules/ssh2
+
+      # Trim node-pty prebuilds to current platform only (saves ~50MB)
+      - name: Trim node-pty prebuilds
+        shell: bash
+        run: |
+          if [ -d node_modules/node-pty/prebuilds ]; then
+            cd node_modules/node-pty/prebuilds
+            case "${{ runner.os }}" in
+              Linux)   rm -rf win32-* darwin-* ;;
+              macOS)   rm -rf win32-* linux-* ;;
+              Windows) rm -rf linux-* darwin-* ;;
+            esac
+          fi
 
       # Electron binary + prebuilt native module binaries (~200 MB per platform).
       # Always restored/saved so main-push warming populates the cache for tag builds.

@@ -6,5 +6,6 @@ export default defineNuxtConfig({
     css: ['~/assets/css/main.css'],
     nitro: {
         experimental: { websocket: true },
+        externals: { inline: [], external: ['ssh2'] },
     },
 });

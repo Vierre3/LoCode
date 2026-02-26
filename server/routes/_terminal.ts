@@ -23,17 +23,25 @@ export default defineWebSocketHandler({
             const cwd = typeof data.cwd === "string" && data.cwd ? data.cwd : process.env.HOME || "/home";
             const shell = process.env.SHELL || "bash";
 
-            const term = pty.spawn(shell, [], {
-                name: "xterm-256color",
-                cols: data.cols || 80,
-                rows: data.rows || 24,
-                cwd,
-                env: {
-                    ...process.env,
-                    TERM: "xterm-256color",
-                    COLORTERM: "truecolor",
-                } as Record<string, string>,
-            });
+            let term: pty.IPty;
+            try {
+                term = pty.spawn(shell, [], {
+                    name: "xterm-256color",
+                    cols: data.cols || 80,
+                    rows: data.rows || 24,
+                    cwd,
+                    env: {
+                        ...process.env,
+                        TERM: "xterm-256color",
+                        COLORTERM: "truecolor",
+                    } as Record<string, string>,
+                });
+            } catch (err: any) {
+                try {
+                    peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[Terminal error: ${err.message}]\x1b[0m\r\n` }));
+                } catch {}
+                return;
+            }
 
             ptys.set(peer.id, term);
 

@@ -18,24 +18,13 @@ const isPacked = app.isPackaged;
 const root = path.join(__dirname, "..");
 
 // Files in asarUnpack live at app.asar.unpacked/ on disk.
-// External binaries (Deno) can't read from inside the asar archive,
-// so we need the real filesystem path for spawned scripts.
 const filesRoot = isPacked
     ? root.replace("app.asar", "app.asar.unpacked")
     : root;
 
-// Deno binary is an extraResource — lives outside the app folder in both modes
-const denoBin = isPacked
-    ? path.join(process.resourcesPath, "deno-bin", process.platform === "win32" ? "deno.exe" : "deno")
-    : path.join(root, "node_modules", "deno", process.platform === "win32" ? "deno.exe" : "deno");
-
-const backendScript = path.join(filesRoot, "backend", "server.ts");
 const nuxtEntry = path.join(filesRoot, ".output", "server", "index.mjs");
 
-let denoPort = null;
 let nuxtPort = null;
-
-let denoProc = null;
 let nuxtProc = null;
 let win = null;
 
@@ -52,31 +41,10 @@ function log(msg) {
 log(`LoCode starting — packed=${isPacked}`);
 log(`root       = ${root}`);
 log(`filesRoot  = ${filesRoot}`);
-log(`denoBin    = ${denoBin}`);
-log(`backend    = ${backendScript}`);
 log(`nuxtEntry  = ${nuxtEntry}`);
-log(`deno exists  = ${fs.existsSync(denoBin)}`);
-log(`backend exists = ${fs.existsSync(backendScript)}`);
-log(`nuxt exists    = ${fs.existsSync(nuxtEntry)}`);
+log(`nuxt exists = ${fs.existsSync(nuxtEntry)}`);
 
 // ── Child processes ──────────────────────────────────────────────────
-function startDeno() {
-    log("[deno] spawning...");
-    denoProc = spawn(
-        denoBin,
-        ["run", "--allow-all", backendScript],
-        {
-            cwd: filesRoot,
-            env: { ...process.env, DENO_PORT: denoPort },
-            stdio: ["ignore", "pipe", "pipe"],
-        }
-    );
-    denoProc.stdout.on("data", (d) => log(`[deno:out] ${d.toString().trimEnd()}`));
-    denoProc.stderr.on("data", (d) => log(`[deno:err] ${d.toString().trimEnd()}`));
-    denoProc.on("error", (err) => log(`[deno:error] ${err.message}`));
-    denoProc.on("exit", (code) => log(`[deno:exit] code=${code}`));
-}
-
 function startNuxt() {
     log("[nuxt] spawning...");
     nuxtProc = spawn(
@@ -86,12 +54,10 @@ function startNuxt() {
             cwd: filesRoot,
             env: {
                 ...process.env,
-                ELECTRON_RUN_AS_NODE: "1", // run as plain Node.js, not as Electron app
+                ELECTRON_RUN_AS_NODE: "1",
                 PORT: nuxtPort,
                 HOST: "127.0.0.1",
                 NODE_ENV: "production",
-                DENO_URL: "http://localhost",
-                DENO_PORT: denoPort,
             },
             stdio: ["ignore", "pipe", "pipe"],
         }
@@ -172,7 +138,6 @@ function showError(message) {
 }
 
 app.on("second-instance", () => {
-    // A second instance tried to launch — focus the existing window instead
     if (win) {
         if (win.isMinimized()) win.restore();
         win.focus();
@@ -192,12 +157,9 @@ function getFreePort() {
 }
 
 app.whenReady().then(async () => {
-    // Let the OS assign guaranteed-free ports
     nuxtPort = await getFreePort();
-    denoPort = await getFreePort();
-    log(`[main] Assigned ports: nuxt=${nuxtPort}, deno=${denoPort}`);
+    log(`[main] Assigned port: nuxt=${nuxtPort}`);
 
-    startDeno();
     startNuxt();
 
     try {
@@ -206,7 +168,6 @@ app.whenReady().then(async () => {
         createWindow();
     } catch (err) {
         log(`[main] Nuxt server did not start: ${err.message}`);
-        // Read the log so far and show it in an error window
         logStream.end();
         const logContent = fs.readFileSync(logPath, "utf-8");
         showError(logContent);
@@ -218,7 +179,6 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
-    try { denoProc?.kill(); } catch {}
     try { nuxtProc?.kill(); } catch {}
 });
 

@@ -165,7 +165,7 @@ serve(async (req) => {
         }
 
         if (req.method === "GET" && url.pathname === "/list") {
-            const root = url.searchParams.get("path") || ".";
+            const root = url.searchParams.get("path") || Deno.env.get("HOME") || "/home";
             const tree = await listDir(root);
             return new Response(JSON.stringify(tree), {
                 status: 200,
