@@ -258,32 +258,36 @@ async function loadWorkTree() {
 async function loadBrowseTree() {
     treeLoading.value = true;
     try {
-        tree.value = await loadTree("/", true);
-        // Auto-expand path segments to user's home dir (e.g. / → home → py)
-        const homeNode = tree.value.find((n: any) => n.path === "/home");
-        if (!homeNode) return;
-        homeNode.open = true;
-        homeNode.children = await loadTree("/home", true);
-        // Detect user dir from rootPath, API info, or fallback to first dir in /home
-        let userPath: string | undefined;
-        const userMatch = props.rootPath?.match(/^\/home\/([^/]+)/);
-        if (userMatch) {
-            userPath = `/home/${userMatch[1]}`;
+        // Determine target home path: from rootPath, API, or nothing
+        let homePath: string | undefined;
+        const rpMatch = props.rootPath?.match(/^(\/(?:home|Users)\/[^/]+)/);
+        if (rpMatch) {
+            homePath = rpMatch[1];
         } else {
             try {
                 const res = await apiFetch("/info");
                 if (res.ok) {
                     const info = await res.json();
-                    if (info.home) userPath = info.home;
+                    if (info.home) homePath = info.home;
                 }
             } catch {}
         }
-        const userDir = userPath
-            ? homeNode.children.find((n: any) => n.path === userPath)
-            : homeNode.children[0];
-        if (userDir) {
-            userDir.open = true;
-            userDir.children = await loadTree(userDir.path, true);
+
+        tree.value = await loadTree("/", true);
+
+        if (!homePath) return;
+
+        // Expand each path segment down to the home dir (e.g. / → Users → py)
+        const segments = homePath.split("/").filter(Boolean); // ["Users", "py"] or ["home", "py"]
+        let currentNodes = tree.value;
+        let currentPath = "";
+        for (const seg of segments) {
+            currentPath += "/" + seg;
+            const node = currentNodes.find((n: any) => n.path === currentPath);
+            if (!node) break;
+            node.open = true;
+            node.children = await loadTree(node.path, true);
+            currentNodes = node.children;
         }
     } finally {
         treeLoading.value = false;

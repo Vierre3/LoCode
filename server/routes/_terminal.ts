@@ -20,9 +20,19 @@ export default defineWebSocketHandler({
             // Don't create duplicate PTY for same peer
             if (ptys.has(peer.id)) return;
 
-            const cwd = typeof data.cwd === "string" && data.cwd ? data.cwd : process.env.HOME || "/home";
+            const home = process.env.HOME || (process.platform === "darwin" ? `/Users/${process.env.USER || ""}` : "/home");
+            let cwd = typeof data.cwd === "string" && data.cwd ? data.cwd : home;
+
+            // Fallback to home or / if cwd doesn't exist
+            const fs = await import("node:fs");
+            if (!fs.existsSync(cwd)) cwd = fs.existsSync(home) ? home : "/";
+
             const shell = process.env.SHELL
                 || (process.platform === "darwin" ? "/bin/zsh" : process.platform === "win32" ? "powershell.exe" : "/bin/bash");
+
+            // Ensure PATH includes standard dirs (macOS .app bundles have minimal PATH)
+            const stdPath = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+            const envPath = process.env.PATH ? `${process.env.PATH}:${stdPath}` : stdPath;
 
             let term: pty.IPty;
             try {
@@ -33,6 +43,8 @@ export default defineWebSocketHandler({
                     cwd,
                     env: {
                         ...process.env,
+                        PATH: envPath,
+                        HOME: home,
                         TERM: "xterm-256color",
                         COLORTERM: "truecolor",
                     } as Record<string, string>,
