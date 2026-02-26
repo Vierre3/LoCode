@@ -6,21 +6,98 @@
                     <button class="dialog-close" @click="$emit('close')">&times;</button>
                     <p class="dialog-title">Settings</p>
 
-                    <div class="field">
-                        <label class="field-label">Remote Backend URL</label>
-                        <input
-                            v-model="urlInput"
-                            class="field-input"
-                            type="url"
-                            placeholder="http://localhost:8080"
-                            spellcheck="false"
-                        />
+                    <!-- SSH Connection -->
+                    <div class="section">
+                        <p class="section-label">SSH Connection</p>
+
+                        <div class="ssh-row">
+                            <div class="field" style="flex: 2">
+                                <label class="field-label">Host</label>
+                                <input
+                                    v-model="sshHost"
+                                    class="field-input"
+                                    type="text"
+                                    placeholder="192.168.1.5"
+                                    spellcheck="false"
+                                />
+                            </div>
+                            <div class="field" style="flex: 0 0 70px">
+                                <label class="field-label">Port</label>
+                                <input
+                                    v-model.number="sshPort"
+                                    class="field-input"
+                                    type="number"
+                                    placeholder="22"
+                                />
+                            </div>
+                        </div>
+
+                        <div class="ssh-row">
+                            <div class="field" style="flex: 1">
+                                <label class="field-label">Username</label>
+                                <input
+                                    v-model="sshUsername"
+                                    class="field-input"
+                                    type="text"
+                                    placeholder="py"
+                                    spellcheck="false"
+                                />
+                            </div>
+                            <div class="field" style="flex: 1">
+                                <label class="field-label">Password <span class="optional">(optional)</span></label>
+                                <input
+                                    v-model="sshPassword"
+                                    class="field-input"
+                                    type="password"
+                                    placeholder="Uses SSH keys by default"
+                                />
+                            </div>
+                        </div>
+
                         <p class="field-hint">
-                            Leave empty for local mode. In SSH mode, set up a tunnel
-                            (<code>ssh -L 8080:localhost:8080 user@host</code>) then enter
-                            <code>http://localhost:8080</code>. The terminal will spawn on that machine.
+                            Enter an SSH address to browse files and run terminals on the remote machine.
+                            Authentication uses your SSH keys (~/.ssh/id_ed25519, id_rsa) or SSH agent automatically.
+                            Password is only needed if key auth fails.
                         </p>
+
+                        <div class="ssh-actions">
+                            <button
+                                v-if="!connected"
+                                class="dialog-btn connect"
+                                :disabled="!sshHost || !sshUsername || connecting"
+                                @click="connect"
+                            >
+                                {{ connecting ? "Connecting..." : "Connect" }}
+                            </button>
+                            <button
+                                v-else
+                                class="dialog-btn disconnect"
+                                @click="disconnect"
+                            >
+                                Disconnect
+                            </button>
+                            <span v-if="connected" class="status-badge connected">Connected to {{ connectedHost }}</span>
+                            <span v-if="error" class="status-badge error">{{ error }}</span>
+                        </div>
                     </div>
+
+                    <!-- Advanced (legacy) -->
+                    <details class="advanced">
+                        <summary class="advanced-label">Advanced</summary>
+                        <div class="field">
+                            <label class="field-label">Legacy Backend URL</label>
+                            <input
+                                v-model="urlInput"
+                                class="field-input"
+                                type="url"
+                                placeholder="http://localhost:8080"
+                                spellcheck="false"
+                            />
+                            <p class="field-hint">
+                                Direct Deno backend URL (old remote mode). Leave empty when using SSH.
+                            </p>
+                        </div>
+                    </details>
 
                     <div class="dialog-actions">
                         <button class="dialog-btn save" @click="save">Save</button>
@@ -36,19 +113,104 @@
 const props = defineProps<{ show: boolean }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
+const sshHost = ref("");
+const sshPort = ref(22);
+const sshUsername = ref("");
+const sshPassword = ref("");
 const urlInput = ref("");
 
-watch(() => props.show, (visible) => {
-    if (visible) {
-        urlInput.value = import.meta.client
-            ? (localStorage.getItem("locode:backendUrl") || "")
-            : "";
+const connecting = ref(false);
+const connected = ref(false);
+const connectedHost = ref("");
+const error = ref("");
+
+watch(() => props.show, async (visible) => {
+    if (!visible) return;
+    error.value = "";
+
+    if (import.meta.client) {
+        // Load SSH target
+        try {
+            const raw = localStorage.getItem("locode:sshTarget");
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                sshHost.value = parsed.host || "";
+                sshPort.value = parsed.port || 22;
+                sshUsername.value = parsed.username || "";
+            }
+        } catch {}
+
+        // Load legacy URL
+        urlInput.value = localStorage.getItem("locode:backendUrl") || "";
+
+        // Check SSH connection status
+        try {
+            const res = await fetch("/api/ssh/info");
+            const info = await res.json();
+            connected.value = info.connected;
+            connectedHost.value = info.host || "";
+        } catch {
+            connected.value = false;
+        }
     }
 });
 
-function save() {
-    const trimmed = urlInput.value.trim().replace(/\/$/, "");
+async function connect() {
+    error.value = "";
+    connecting.value = true;
+
+    try {
+        const res = await fetch("/api/ssh/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                host: sshHost.value,
+                port: sshPort.value || 22,
+                username: sshUsername.value,
+                password: sshPassword.value || undefined,
+            }),
+        });
+
+        if (!res.ok) {
+            const text = await res.text();
+            error.value = text || "Connection failed";
+            return;
+        }
+
+        const data = await res.json();
+        connected.value = true;
+        connectedHost.value = sshHost.value;
+
+        // Persist SSH target (no password)
+        if (import.meta.client) {
+            localStorage.setItem("locode:sshTarget", JSON.stringify({
+                host: sshHost.value,
+                port: sshPort.value || 22,
+                username: sshUsername.value,
+            }));
+        }
+    } catch (err: any) {
+        error.value = err.message || "Connection failed";
+    } finally {
+        connecting.value = false;
+    }
+}
+
+async function disconnect() {
+    try {
+        await fetch("/api/ssh/disconnect", { method: "POST" });
+    } catch {}
+    connected.value = false;
+    connectedHost.value = "";
     if (import.meta.client) {
+        localStorage.removeItem("locode:sshTarget");
+    }
+}
+
+function save() {
+    if (import.meta.client) {
+        // Save legacy URL
+        const trimmed = urlInput.value.trim().replace(/\/$/, "");
         if (trimmed) {
             localStorage.setItem("locode:backendUrl", trimmed);
         } else {
@@ -81,7 +243,7 @@ function save() {
     border: 1.5px solid rgba(255, 255, 255, 0.2);
     border-radius: 12px;
     padding: 24px;
-    max-width: 440px;
+    max-width: 500px;
     width: 90%;
     box-shadow:
         0 4px 16px rgba(0, 0, 0, 0.35),
@@ -120,27 +282,48 @@ function save() {
     margin-bottom: 18px;
 }
 
+.section {
+    margin-bottom: 16px;
+}
+
+.section-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.7);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+}
+
+.ssh-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
 .field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 20px;
+    gap: 4px;
+    margin-bottom: 8px;
 }
 
 .field-label {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.6);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.5);
+}
+.optional {
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.3);
 }
 
 .field-input {
     background: rgba(255, 255, 255, 0.07);
     border: 1.5px solid rgba(255, 255, 255, 0.15);
     border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 0.85rem;
+    padding: 7px 9px;
+    font-size: 0.82rem;
     font-family: ui-monospace, monospace;
     color: rgba(255, 255, 255, 0.9);
     outline: none;
@@ -150,21 +333,59 @@ function save() {
     border-color: rgba(100, 180, 255, 0.5);
 }
 .field-input::placeholder {
-    color: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.22);
 }
+/* Hide number input spinners */
+.field-input[type="number"]::-webkit-inner-spin-button,
+.field-input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.field-input[type="number"] { -moz-appearance: textfield; }
 
 .field-hint {
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.4);
-    line-height: 1.5;
-}
-.field-hint code {
-    font-family: ui-monospace, monospace;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 3px;
-    padding: 1px 4px;
     font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.5;
+    margin-bottom: 10px;
 }
+
+.ssh-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.status-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+.status-badge.connected {
+    color: #6ee7b7;
+    background: rgba(110, 231, 183, 0.12);
+    border: 1px solid rgba(110, 231, 183, 0.3);
+}
+.status-badge.error {
+    color: #fca5a5;
+    background: rgba(252, 165, 165, 0.12);
+    border: 1px solid rgba(252, 165, 165, 0.3);
+}
+
+.advanced {
+    margin-bottom: 16px;
+}
+.advanced-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.35);
+    cursor: pointer;
+    padding: 4px 0;
+    margin-bottom: 8px;
+}
+.advanced-label:hover { color: rgba(255, 255, 255, 0.55); }
 
 .dialog-actions {
     display: flex;
@@ -172,9 +393,8 @@ function save() {
 }
 
 .dialog-btn {
-    flex: 1;
-    padding: 8px 12px;
-    font-size: 0.85rem;
+    padding: 7px 14px;
+    font-size: 0.82rem;
     font-weight: 700;
     border-radius: 5px;
     cursor: pointer;
@@ -183,9 +403,34 @@ function save() {
     transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
         background 0.15s ease, box-shadow 0.15s ease;
 }
-.dialog-btn:active { transform: scale(0.93); transition: transform 0.08s ease; }
+.dialog-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.dialog-btn:active:not(:disabled) { transform: scale(0.93); transition: transform 0.08s ease; }
+
+.dialog-btn.connect {
+    background: rgba(110, 231, 183, 0.2);
+    border-color: rgba(110, 231, 183, 0.4);
+}
+.dialog-btn.connect:hover:not(:disabled) {
+    background: rgba(110, 231, 183, 0.35);
+    box-shadow: 0 0 14px rgba(110, 231, 183, 0.25);
+    transform: translateY(-2px);
+}
+
+.dialog-btn.disconnect {
+    background: rgba(252, 165, 165, 0.2);
+    border-color: rgba(252, 165, 165, 0.4);
+}
+.dialog-btn.disconnect:hover {
+    background: rgba(252, 165, 165, 0.35);
+    box-shadow: 0 0 14px rgba(252, 165, 165, 0.25);
+    transform: translateY(-2px);
+}
 
 .dialog-btn.save {
+    flex: 1;
     background: rgba(100, 180, 255, 0.25);
     border-color: rgba(100, 180, 255, 0.4);
 }
@@ -196,6 +441,7 @@ function save() {
 }
 
 .dialog-btn.cancel {
+    flex: 1;
     background: rgba(255, 255, 255, 0.1);
 }
 .dialog-btn.cancel:hover {
@@ -203,7 +449,7 @@ function save() {
     transform: translateY(-2px);
 }
 
-/* Transition — same as UnsavedDialog */
+/* Transition */
 .modal-enter-active { animation: backdrop-fade-in 0.25s ease forwards; }
 @keyframes backdrop-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .modal-enter-active .dialog { animation: modal-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }

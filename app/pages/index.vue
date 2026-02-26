@@ -78,7 +78,7 @@
 
         <SettingsModal :show="showSettings"
             @close="showSettings = false"
-            @saved="isRemote = !!getStoredBackendUrl()" />
+            @saved="isRemote = getMode() !== 'local'" />
     </div>
 </template>
 
@@ -383,10 +383,10 @@ import { useLocodeConfig } from '~/composables/useLocodeConfig';
 import type { LocodeConfig, SkeletonNode } from '~/composables/useLocodeConfig';
 
 const { loadConfig, saveConfig } = useLocodeConfig();
-const { apiFetch, getStoredBackendUrl } = useApi();
+const { apiFetch, getMode } = useApi();
 
 const showSettings = ref(false);
-const isRemote = import.meta.client ? ref(!!getStoredBackendUrl()) : ref(false);
+const isRemote = import.meta.client ? ref(getMode() !== "local") : ref(false);
 
 // --- Config state (loaded from .LoCode) ---
 const cfgOpenFolders = ref<string[]>([]);
@@ -546,6 +546,20 @@ onMounted(async () => {
         .filter(k => legacyPrefixes.some(p => k.startsWith(p)))
         .forEach(k => localStorage.removeItem(k));
     ["locode:sidebarWidth", "locode:splitRatio", "locode:terminalHeight", "locode:currentFile"].forEach(k => localStorage.removeItem(k));
+
+    if (!rootPath.value) {
+        // Auto-detect home directory on first visit
+        try {
+            const res = await apiFetch("/info");
+            if (res.ok) {
+                const info = await res.json();
+                if (info.home) {
+                    rootPath.value = info.home;
+                    localStorage.setItem("locode:rootPath", info.home);
+                }
+            }
+        } catch {}
+    }
 
     if (rootPath.value) {
         const config = await loadConfig(rootPath.value);
