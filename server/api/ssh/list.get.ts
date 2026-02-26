@@ -1,5 +1,3 @@
-import { getSftp, getRemoteHome } from "~/server/utils/ssh";
-
 export default defineEventHandler(async (event) => {
     const sftpSession = getSftp();
     if (!sftpSession) {

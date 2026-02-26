@@ -1,8 +1,6 @@
 import { defineWebSocketHandler } from "h3";
-import { getSSHClient } from "~/server/utils/ssh";
-import type { ClientChannel } from "ssh2";
 
-const channels = new Map<string, ClientChannel>();
+const channels = new Map<string, any>();
 
 export default defineWebSocketHandler({
     open(_peer) {
@@ -37,7 +35,7 @@ export default defineWebSocketHandler({
                     cols,
                     rows,
                 },
-                (err, stream) => {
+                (err: Error | undefined, stream: any) => {
                     if (err) {
                         try {
                             peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[SSH shell error: ${err.message}]\x1b[0m\r\n` }));

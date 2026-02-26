@@ -1,5 +1,3 @@
-import { sshConnect } from "~/server/utils/ssh";
-
 export default defineEventHandler(async (event) => {
     let body: { host?: unknown; port?: unknown; username?: unknown; password?: unknown };
     try {
