@@ -1,7 +1,5 @@
 <template>
-    <div class="h-full w-full terminal-outer">
-        <div ref="termContainer" class="h-full w-full"></div>
-    </div>
+    <div ref="termContainer" class="h-full w-full terminal-wrapper"></div>
 </template>
 
 <script setup lang="ts">
@@ -38,36 +36,6 @@ const termId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 const isMobile = window.matchMedia("(max-width: 767px)").matches;
 
-/** Custom fit: measures real scrollbar width instead of FitAddon's hardcoded 14px.
- *  On macOS, scrollbars are overlay (0px) — FitAddon subtracts 14px that don't exist,
- *  causing ~2 fewer columns and RPROMPT not reaching the right edge. */
-function doFit() {
-    if (!term || !term.element?.parentElement) return;
-    const core = (term as any)._core;
-    const dims = core._renderService.dimensions;
-    if (!dims?.css?.cell?.width || !dims?.css?.cell?.height) return;
-
-    const parentStyle = window.getComputedStyle(term.element.parentElement);
-    const parentW = parseInt(parentStyle.getPropertyValue("width"));
-    const parentH = parseInt(parentStyle.getPropertyValue("height"));
-
-    const xtermStyle = window.getComputedStyle(term.element);
-    const padX = parseInt(xtermStyle.paddingLeft || "0") + parseInt(xtermStyle.paddingRight || "0");
-    const padY = parseInt(xtermStyle.paddingTop || "0") + parseInt(xtermStyle.paddingBottom || "0");
-
-    // Measure actual scrollbar width from the DOM (0 on macOS overlay scrollbars)
-    const viewport = term.element.querySelector(".xterm-viewport") as HTMLElement | null;
-    const scrollbarW = viewport ? (viewport.offsetWidth - viewport.clientWidth) : 0;
-
-    const cols = Math.max(2, Math.floor((parentW - padX - scrollbarW) / dims.css.cell.width));
-    const rows = Math.max(1, Math.floor((parentH - padY) / dims.css.cell.height));
-
-    if (cols !== term.cols || rows !== term.rows) {
-        core._renderService.clear();
-        term.resize(cols, rows);
-    }
-}
-
 onMounted(async () => {
     await nextTick();
     if (!termContainer.value) return;
@@ -89,10 +57,17 @@ onMounted(async () => {
     term.loadAddon(new WebLinksAddon());
     term.open(termContainer.value);
 
-    // Wait for custom fonts to load so FitAddon measures correct cell width
+    // Wait for web fonts (@nuxt/fonts loads Fira Code etc. via @font-face).
+    // xterm measures cell width at open() using the fallback monospace font (wider).
+    // Once the web font loads, cells render narrower but xterm's cache is stale.
+    // Toggling fontSize forces xterm to re-measure with the loaded font.
     await document.fonts.ready;
+    const targetSize = term.options.fontSize || 14;
+    term.options.fontSize = targetSize + 1;
     await nextTick();
-    doFit();
+    term.options.fontSize = targetSize;
+    await nextTick();
+    fitAddon.fit();
 
     if (electronTerminal) {
         // ── Electron mode: IPC to main process (node-pty runs there) ──
@@ -116,13 +91,6 @@ onMounted(async () => {
 
         if (!result.ok && term) {
             term.write(`\r\n\x1b[31m[Terminal error: ${result.error}]\x1b[0m\r\n`);
-        }
-
-        // Re-fit after creation to ensure PTY has accurate dimensions
-        await nextTick();
-        if (fitAddon && term) {
-            doFit();
-            electronTerminal!.resize(termId, term.cols, term.rows);
         }
 
         term.onData((data) => electronTerminal!.write(termId, data));
@@ -179,7 +147,7 @@ onMounted(async () => {
         if (!fitAddon || !term) return;
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
-        doFit();
+        fitAddon.fit();
         if (electronTerminal) {
             electronTerminal.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
@@ -202,7 +170,7 @@ watch(() => props.active, (active) => {
     if (active && fitAddon && term && termContainer.value) {
         nextTick(() => {
             if (!termContainer.value || termContainer.value.offsetHeight === 0) return;
-            doFit();
+            fitAddon!.fit();
         });
     }
 });
@@ -227,14 +195,16 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="css" scoped>
-.terminal-outer {
+.terminal-wrapper {
     background: #1e1e1e;
-    padding: 4px;
-    box-sizing: border-box;
 }
 
-.terminal-outer :deep(.xterm) {
+.terminal-wrapper :deep(.xterm) {
+    padding: 4px;
     height: 100%;
 }
 
+.terminal-wrapper :deep(.xterm-viewport) {
+    overflow-y: auto !important;
+}
 </style>
