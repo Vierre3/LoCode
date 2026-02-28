@@ -45,9 +45,15 @@ onMounted(async () => {
 watch(
     () => props.modelValue,
     (newValue) => {
-        if (editor && editor.getValue() !== newValue) {
-            editor.setValue(newValue);
-        }
+        if (!editor || editor.getValue() === newValue) return;
+        // Replace full content while preserving cursor & scroll position
+        const model = editor.getModel();
+        if (!model) { editor.setValue(newValue); return; }
+        const fullRange = model.getFullModelRange();
+        editor.executeEdits("auto-reload", [{
+            range: fullRange,
+            text: newValue,
+        }]);
     }
 );
 

@@ -344,13 +344,20 @@ const { apiFetch, getMode } = useApi();
 const showSettings = ref(false);
 const isRemote = import.meta.client ? ref(getMode() !== "local") : ref(false);
 
+// Electron IPC bridge for multi-window session tracking (injected by preload.cjs)
+const electronSession = import.meta.client
+    ? (window as any).electronSession as { getInitialRoot: () => string; setRoot: (path: string) => void } | undefined
+    : undefined;
+
 // --- Config state (loaded from .LoCode) ---
 const cfgOpenFolders = ref<string[]>([]);
 const cfgSplitRatio = ref(50);
 const cfgTerminalHeight = ref(261);
 
 const rootPath = ref(
-    import.meta.client ? localStorage.getItem("locode:rootPath") || "" : ""
+    import.meta.client
+        ? (electronSession?.getInitialRoot() || localStorage.getItem("locode:rootPath") || "")
+        : ""
 );
 const sidebarOpen = ref(false);
 const sidebarWidth = ref(250);
@@ -498,6 +505,8 @@ onMounted(async () => {
     ["locode:sidebarWidth", "locode:splitRatio", "locode:terminalHeight", "locode:currentFile"].forEach(k => localStorage.removeItem(k));
 
     if (rootPath.value) {
+        // Sync rootPath to Electron session tracking (covers localStorage-restored roots)
+        electronSession?.setRoot(rootPath.value);
         const config = await loadConfig(rootPath.value);
         sidebarWidth.value = config.sidebarWidth;
         cfgOpenFolders.value = config.openFolders;
@@ -611,6 +620,7 @@ async function onSelectRoot(path: string) {
     cfgTerminalHeight.value = config.terminalHeight;
     rootPath.value = path;
     localStorage.setItem("locode:rootPath", path);
+    electronSession?.setRoot(path);
     restoreWorkspace(path, config);
 }
 
