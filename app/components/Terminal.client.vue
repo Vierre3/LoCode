@@ -38,6 +38,36 @@ const termId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 const isMobile = window.matchMedia("(max-width: 767px)").matches;
 
+/** Custom fit: measures real scrollbar width instead of FitAddon's hardcoded 14px.
+ *  On macOS, scrollbars are overlay (0px) — FitAddon subtracts 14px that don't exist,
+ *  causing ~2 fewer columns and RPROMPT not reaching the right edge. */
+function doFit() {
+    if (!term || !term.element?.parentElement) return;
+    const core = (term as any)._core;
+    const dims = core._renderService.dimensions;
+    if (!dims?.css?.cell?.width || !dims?.css?.cell?.height) return;
+
+    const parentStyle = window.getComputedStyle(term.element.parentElement);
+    const parentW = parseInt(parentStyle.getPropertyValue("width"));
+    const parentH = parseInt(parentStyle.getPropertyValue("height"));
+
+    const xtermStyle = window.getComputedStyle(term.element);
+    const padX = parseInt(xtermStyle.paddingLeft || "0") + parseInt(xtermStyle.paddingRight || "0");
+    const padY = parseInt(xtermStyle.paddingTop || "0") + parseInt(xtermStyle.paddingBottom || "0");
+
+    // Measure actual scrollbar width from the DOM (0 on macOS overlay scrollbars)
+    const viewport = term.element.querySelector(".xterm-viewport") as HTMLElement | null;
+    const scrollbarW = viewport ? (viewport.offsetWidth - viewport.clientWidth) : 0;
+
+    const cols = Math.max(2, Math.floor((parentW - padX - scrollbarW) / dims.css.cell.width));
+    const rows = Math.max(1, Math.floor((parentH - padY) / dims.css.cell.height));
+
+    if (cols !== term.cols || rows !== term.rows) {
+        core._renderService.clear();
+        term.resize(cols, rows);
+    }
+}
+
 onMounted(async () => {
     await nextTick();
     if (!termContainer.value) return;
@@ -62,7 +92,7 @@ onMounted(async () => {
     // Wait for custom fonts to load so FitAddon measures correct cell width
     await document.fonts.ready;
     await nextTick();
-    fitAddon.fit();
+    doFit();
 
     if (electronTerminal) {
         // ── Electron mode: IPC to main process (node-pty runs there) ──
@@ -91,7 +121,7 @@ onMounted(async () => {
         // Re-fit after creation to ensure PTY has accurate dimensions
         await nextTick();
         if (fitAddon && term) {
-            fitAddon.fit();
+            doFit();
             electronTerminal!.resize(termId, term.cols, term.rows);
         }
 
@@ -149,7 +179,7 @@ onMounted(async () => {
         if (!fitAddon || !term) return;
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
-        fitAddon.fit();
+        doFit();
         if (electronTerminal) {
             electronTerminal.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
@@ -172,7 +202,7 @@ watch(() => props.active, (active) => {
     if (active && fitAddon && term && termContainer.value) {
         nextTick(() => {
             if (!termContainer.value || termContainer.value.offsetHeight === 0) return;
-            fitAddon!.fit();
+            doFit();
         });
     }
 });
