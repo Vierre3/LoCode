@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, Menu } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
@@ -299,6 +299,37 @@ ipcMain.on("term:kill", (_event, { id }) => {
 });
 
 app.whenReady().then(async () => {
+    // ── Application menu (enables "New Window" in dock right-click on macOS) ──
+    const isMac = process.platform === "darwin";
+    const template = [
+        ...(isMac ? [{ role: "appMenu" }] : []),
+        {
+            label: "File",
+            submenu: [
+                { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
+                { type: "separator" },
+                isMac ? { role: "close" } : { role: "quit" },
+            ],
+        },
+        { role: "editMenu" },
+        {
+            label: "View",
+            submenu: [
+                { role: "reload" },
+                { role: "forceReload" },
+                { role: "toggleDevTools" },
+                { type: "separator" },
+                { role: "resetZoom" },
+                { role: "zoomIn" },
+                { role: "zoomOut" },
+                { type: "separator" },
+                { role: "togglefullscreen" },
+            ],
+        },
+        { role: "windowMenu" },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+
     nuxtPort = await getFreePort();
     log(`[main] Assigned port: nuxt=${nuxtPort}`);
 
