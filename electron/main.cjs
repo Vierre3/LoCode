@@ -330,9 +330,13 @@ app.whenReady().then(async () => {
     });
 });
 
-app.on("will-quit", () => {
+// before-quit fires BEFORE windows start closing — save sessions while the map is still populated
+app.on("before-quit", () => {
     isQuitting = true;
     saveSessions();
+});
+
+app.on("will-quit", () => {
     for (const term of terminals.values()) {
         try { term.kill(); } catch {}
     }

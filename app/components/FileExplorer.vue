@@ -214,6 +214,7 @@ async function loadBrowseTree() {
 }
 
 function toggleBrowse() {
+    hoveredRawPath.value = "";
     if (browsing.value && props.rootPath) {
         browsing.value = false;
         loadWorkTree();
@@ -224,6 +225,7 @@ function toggleBrowse() {
 }
 
 function selectFolder(node: any) {
+    hoveredRawPath.value = "";
     browsing.value = false;
     if (node.path === props.rootPath) {
         loadWorkTree();
