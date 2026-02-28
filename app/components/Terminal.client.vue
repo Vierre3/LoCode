@@ -59,7 +59,8 @@ onMounted(async () => {
     term.loadAddon(new WebLinksAddon());
     term.open(termContainer.value);
 
-    // Fit after a small delay to ensure container has dimensions
+    // Wait for custom fonts to load so FitAddon measures correct cell width
+    await document.fonts.ready;
     await nextTick();
     fitAddon.fit();
 
@@ -206,7 +207,4 @@ onBeforeUnmount(() => {
     height: 100%;
 }
 
-.terminal-outer :deep(.xterm-viewport) {
-    overflow-y: auto !important;
-}
 </style>
