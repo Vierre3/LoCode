@@ -36,6 +36,22 @@ const termId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 const isMobile = window.matchMedia("(max-width: 767px)").matches;
 
+// FitAddon always subtracts 14px for a non-existent overview ruler.
+// We don't load the OverviewRulerAddon, so those 14px are phantom — add the stolen cols back.
+function doFit() {
+    if (!fitAddon || !term) return;
+    fitAddon.fit();
+    const core = (term as any)._core;
+    const cellW = core._renderService?.dimensions?.css?.cell?.width;
+    if (cellW > 0) {
+        const extra = Math.floor(14 / cellW);
+        if (extra > 0) {
+            core._renderService.clear();
+            term.resize(term.cols + extra, term.rows);
+        }
+    }
+}
+
 onMounted(async () => {
     await nextTick();
     if (!termContainer.value) return;
@@ -58,7 +74,7 @@ onMounted(async () => {
     term.open(termContainer.value);
 
     await nextTick();
-    fitAddon.fit();
+    doFit();
 
     if (electronTerminal) {
         // ── Electron mode: IPC to main process (node-pty runs there) ──
@@ -87,7 +103,7 @@ onMounted(async () => {
         // Re-fit after PTY creation in case container wasn't at final size
         setTimeout(() => {
             if (fitAddon && term && electronTerminal) {
-                fitAddon.fit();
+                doFit();
                 electronTerminal.resize(termId, term.cols, term.rows);
             }
         }, 200);
@@ -146,7 +162,7 @@ onMounted(async () => {
         if (!fitAddon || !term) return;
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
-        fitAddon.fit();
+        doFit();
         if (electronTerminal) {
             electronTerminal.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
@@ -169,7 +185,7 @@ watch(() => props.active, (active) => {
     if (active && fitAddon && term && termContainer.value) {
         nextTick(() => {
             if (!termContainer.value || termContainer.value.offsetHeight === 0) return;
-            fitAddon!.fit();
+            doFit();
         });
     }
 });
