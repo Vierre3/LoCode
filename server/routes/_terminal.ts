@@ -51,7 +51,7 @@ export default defineWebSocketHandler({
                 });
             } catch (err: any) {
                 try {
-                    peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[Terminal error: ${err.message}]\x1b[0m\r\n` }));
+                    peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[Terminal error: ${err.message}]\x1b[0m\r\n\x1b[90mshell=${shell}  cwd=${cwd}  platform=${process.platform}\x1b[0m\r\n` }));
                 } catch {}
                 return;
             }
