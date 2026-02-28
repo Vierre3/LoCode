@@ -148,7 +148,7 @@ jobs:
 
 
   create_release:
-    if: needs.check_branch.outputs.on_main == 0
+    # if: needs.check_branch.outputs.on_main == 0
     needs: check_branch
     runs-on: ubuntu-latest
     steps:

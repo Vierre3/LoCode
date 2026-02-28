@@ -1,5 +1,7 @@
 <template>
-    <div ref="termContainer" class="h-full w-full terminal-wrapper"></div>
+    <div class="h-full w-full terminal-outer">
+        <div ref="termContainer" class="h-full w-full"></div>
+    </div>
 </template>
 
 <script setup lang="ts">
@@ -194,17 +196,17 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="css" scoped>
-.terminal-wrapper {
+.terminal-outer {
     background: #1e1e1e;
     padding: 4px;
     box-sizing: border-box;
 }
 
-.terminal-wrapper :deep(.xterm) {
+.terminal-outer :deep(.xterm) {
     height: 100%;
 }
 
-.terminal-wrapper :deep(.xterm-viewport) {
+.terminal-outer :deep(.xterm-viewport) {
     overflow-y: auto !important;
 }
 </style>
