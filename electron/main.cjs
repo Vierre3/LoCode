@@ -1,5 +1,5 @@
 "use strict";
-const { app, BrowserWindow, shell, ipcMain, Menu } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, Menu, nativeImage } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
@@ -24,6 +24,7 @@ const filesRoot = isPacked
     : root;
 
 const nuxtEntry = path.join(filesRoot, ".output", "server", "index.mjs");
+const iconPath = path.join(__dirname, "icon.png");
 
 let nuxtPort = null;
 let nuxtProc = null;
@@ -125,6 +126,7 @@ function createWindow(rootPath) {
         minWidth: 600,
         minHeight: 400,
         title: "LoCode",
+        icon: iconPath,
         backgroundColor: "#0d1117",
         webPreferences: {
             nodeIntegration: false,
@@ -329,6 +331,14 @@ app.whenReady().then(async () => {
         { role: "windowMenu" },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+
+    // macOS dock: right-click menu with "New Window" + dock icon
+    if (isMac && app.dock) {
+        app.dock.setMenu(Menu.buildFromTemplate([
+            { label: "New Window", click: () => createWindow() },
+        ]));
+        app.dock.setIcon(nativeImage.createFromPath(iconPath));
+    }
 
     nuxtPort = await getFreePort();
     log(`[main] Assigned port: nuxt=${nuxtPort}`);
