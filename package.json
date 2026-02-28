@@ -63,6 +63,7 @@
       "node_modules/safer-buffer/**/*",
       "node_modules/tweetnacl/**/*"
     ],
+    "icon": "electron/icon-1024.png",
     "files": [
       "electron/**/*",
       ".output/**/*"
