@@ -85,6 +85,13 @@ onMounted(async () => {
             term.write(`\r\n\x1b[31m[Terminal error: ${result.error}]\x1b[0m\r\n`);
         }
 
+        // Re-fit after creation to ensure PTY has accurate dimensions
+        await nextTick();
+        if (fitAddon && term) {
+            fitAddon.fit();
+            electronTerminal!.resize(termId, term.cols, term.rows);
+        }
+
         term.onData((data) => electronTerminal!.write(termId, data));
     } else {
         // ── Web mode: WebSocket to Nuxt server / SSH backend ──
@@ -189,6 +196,8 @@ onBeforeUnmount(() => {
 <style lang="css" scoped>
 .terminal-wrapper {
     background: #1e1e1e;
+    padding: 4px;
+    box-sizing: border-box;
 }
 
 .terminal-wrapper :deep(.xterm) {
