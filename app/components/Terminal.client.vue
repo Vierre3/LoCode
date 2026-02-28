@@ -73,7 +73,18 @@ onMounted(async () => {
     term.loadAddon(new WebLinksAddon());
     term.open(termContainer.value);
 
-    await nextTick();
+    // Wait until the container has real dimensions before fitting and spawning the PTY.
+    // On first load, the terminal panel may not be laid out yet (0 height).
+    await new Promise<void>((resolve) => {
+        const check = () => {
+            if (!termContainer.value) return resolve();
+            const { offsetWidth, offsetHeight } = termContainer.value;
+            if (offsetWidth > 0 && offsetHeight > 0) return resolve();
+            requestAnimationFrame(check);
+        };
+        check();
+    });
+
     doFit();
 
     if (electronTerminal) {
@@ -99,14 +110,6 @@ onMounted(async () => {
         if (!result.ok && term) {
             term.write(`\r\n\x1b[31m[Terminal error: ${result.error}]\x1b[0m\r\n`);
         }
-
-        // Re-fit after PTY creation in case container wasn't at final size
-        setTimeout(() => {
-            if (fitAddon && term && electronTerminal) {
-                doFit();
-                electronTerminal.resize(termId, term.cols, term.rows);
-            }
-        }, 200);
 
         term.onData((data) => electronTerminal!.write(termId, data));
     } else {
