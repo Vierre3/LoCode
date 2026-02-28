@@ -57,15 +57,6 @@ onMounted(async () => {
     term.loadAddon(new WebLinksAddon());
     term.open(termContainer.value);
 
-    // Wait for web fonts (@nuxt/fonts loads Fira Code etc. via @font-face).
-    // xterm measures cell width at open() using the fallback monospace font (wider).
-    // Once the web font loads, cells render narrower but xterm's cache is stale.
-    // Toggling fontSize forces xterm to re-measure with the loaded font.
-    await document.fonts.ready;
-    const targetSize = term.options.fontSize || 14;
-    term.options.fontSize = targetSize + 1;
-    await nextTick();
-    term.options.fontSize = targetSize;
     await nextTick();
     fitAddon.fit();
 
@@ -92,6 +83,14 @@ onMounted(async () => {
         if (!result.ok && term) {
             term.write(`\r\n\x1b[31m[Terminal error: ${result.error}]\x1b[0m\r\n`);
         }
+
+        // Re-fit after PTY creation in case container wasn't at final size
+        setTimeout(() => {
+            if (fitAddon && term && electronTerminal) {
+                fitAddon.fit();
+                electronTerminal.resize(termId, term.cols, term.rows);
+            }
+        }, 200);
 
         term.onData((data) => electronTerminal!.write(termId, data));
     } else {

@@ -175,8 +175,13 @@ ipcMain.handle("term:create", (_event, { id, cols, rows, cwd }) => {
         const termCwd = cwd || home;
         const termShell = getShell();
 
-        log(`[pty] spawn id=${id} shell=${termShell} cwd=${termCwd}`);
-        const term = pty.spawn(termShell, [], {
+        // Spawn a login shell on macOS — Terminal.app and iTerm2 do the same.
+        // Without -l, /etc/zprofile isn't sourced → LANG/LC_ALL may be missing,
+        // causing zsh to miscount multi-byte characters (┌─✓❯) in the prompt.
+        const shellArgs = process.platform === "darwin" ? ["-l"] : [];
+
+        log(`[pty] spawn id=${id} shell=${termShell} args=${shellArgs} cols=${cols} rows=${rows} cwd=${termCwd}`);
+        const term = pty.spawn(termShell, shellArgs, {
             name: "xterm-256color",
             cols: cols || 80,
             rows: rows || 24,
@@ -186,6 +191,7 @@ ipcMain.handle("term:create", (_event, { id, cols, rows, cwd }) => {
                 TERM: "xterm-256color",
                 COLORTERM: "truecolor",
                 HOME: home,
+                LANG: process.env.LANG || "en_US.UTF-8",
             },
         });
 
