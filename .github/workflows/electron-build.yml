@@ -14,15 +14,15 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows
-            platform: win
-            artifact: .exe
+          # - os: windows
+          #   platform: win
+          #   artifact: .exe
           - os: macos
             platform: mac
             artifact: .dmg
-          - os: ubuntu
-            platform: linux
-            artifact: .AppImage
+          # - os: ubuntu
+          #   platform: linux
+          #   artifact: .AppImage
 
     runs-on: ${{ matrix.os }}-latest
 
@@ -144,16 +144,11 @@ jobs:
         run: git fetch origin main --tags
       - name: Check if tag is on main
         id: check
-        run: |
-          if git merge-base --is-ancestor ${{ github.sha }} origin/main; then
-            echo "output=true" >> $GITHUB_OUTPUT
-          else
-            echo "output=false" >> $GITHUB_OUTPUT
-          fi
+        run: echo "output=$(git merge-base --is-ancestor ${{ github.sha }} origin/main; echo $?)" >> $GITHUB_OUTPUT
 
 
   create_release:
-    # if: needs.check_branch.outputs.on_main == 'true'
+    if: needs.check_branch.outputs.on_main == 1
     needs: check_branch
     runs-on: ubuntu-latest
     steps:

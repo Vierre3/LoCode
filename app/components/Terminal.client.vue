@@ -192,7 +192,6 @@ onBeforeUnmount(() => {
 }
 
 .terminal-wrapper :deep(.xterm) {
-    padding: 4px;
     height: 100%;
 }
 
