@@ -1,11 +1,8 @@
-export type SkeletonNode = { depth: number; type: string; width: number }
-
 export interface LocodeConfig {
     sidebarWidth: number
     splitRatio: number
     terminalHeight: number
     openFolders: string[]
-    skeleton: SkeletonNode[]
     paneFiles: string[]
     activePaneIndex: number
     terminalOpen: boolean
@@ -16,20 +13,11 @@ export interface LocodeConfig {
     terminalSavedPairs: [number, number][]
 }
 
-export const DEFAULT_SKELETON: SkeletonNode[] = [
-    { depth: 0, type: "dir", width: 55 },
-    { depth: 1, type: "file", width: 45 },
-    { depth: 1, type: "file", width: 50 },
-    { depth: 0, type: "dir", width: 60 },
-    { depth: 0, type: "file", width: 40 },
-]
-
 const DEFAULTS: LocodeConfig = {
     sidebarWidth: 250,
     splitRatio: 50,
     terminalHeight: 261,
     openFolders: [],
-    skeleton: DEFAULT_SKELETON,
     paneFiles: [],
     activePaneIndex: 0,
     terminalOpen: false,

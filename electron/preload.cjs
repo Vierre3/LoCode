@@ -1,6 +1,15 @@
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Session management: multi-window root path tracking
+contextBridge.exposeInMainWorld("electronSession", {
+    getInitialRoot: () => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get("root") || "";
+    },
+    setRoot: (rootPath) => ipcRenderer.send("session:setRoot", rootPath),
+});
+
 contextBridge.exposeInMainWorld("electronTerminal", {
     create: (opts) => ipcRenderer.invoke("term:create", opts),
     write: (id, data) => ipcRenderer.send("term:input", { id, data }),

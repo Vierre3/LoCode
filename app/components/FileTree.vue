@@ -55,6 +55,11 @@ function onLeave() {
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     hideTooltip?.();
 }
+
+onBeforeUnmount(() => {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    hideTooltip?.();
+});
 </script>
 
 <style lang="css" scoped>

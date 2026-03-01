@@ -130,7 +130,7 @@ jobs:
           if-no-files-found: error
 
 
-  check_branch:
+  check_tag_branch:
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
@@ -148,8 +148,8 @@ jobs:
 
 
   create_release:
-    if: needs.check_branch.outputs.on_main == 0
-    needs: check_branch
+    if: needs.check_tag_branch.outputs.on_main == 0
+    needs: check_tag_branch
     runs-on: ubuntu-latest
     steps:
       - name: Download files

@@ -47,7 +47,8 @@
   },
   "overrides": {
     "minimatch": ">=10.2.1",
-    "citty": "^0.2.1"
+    "citty": "^0.2.1",
+    "serialize-javascript": ">=7.0.3"
   },
   "build": {
     "appId": "dev.locode.app",
@@ -63,6 +64,7 @@
       "node_modules/safer-buffer/**/*",
       "node_modules/tweetnacl/**/*"
     ],
+    "icon": "electron/icon-1024.png",
     "files": [
       "electron/**/*",
       ".output/**/*"

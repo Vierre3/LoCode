@@ -17,11 +17,11 @@
 
         <!-- Sidebar -->
         <div class="sidebar" :class="{ open: sidebarOpen, 'no-transition': isResizing }" :style="sidebarStyle">
-            <FileExplorer
+            <FileExplorer ref="fileExplorerRef"
                 @select-file="onSelectFile" @select-root="onSelectRoot"
-                @update:openFolders="onUpdateOpenFolders" @update:skeleton="onUpdateSkeleton"
+                @update:openFolders="onUpdateOpenFolders"
                 :openFiles="panes.map(p => p.filePath).filter(Boolean)" :rootPath="rootPath"
-                :initialOpenFolders="cfgOpenFolders" :initialSkeleton="cfgSkeleton" />
+                :initialOpenFolders="cfgOpenFolders" />
             <div v-if="!isMobile" class="resize-handle" @mousedown.prevent="startResize" />
         </div>
 
@@ -52,7 +52,7 @@
                         @click="terminalOpen ? closeTerminal() : openTerminal()" />
                 </div>
             </div>
-            <div class="flex-1 min-h-0 flex flex-col gap-2">
+            <div class="flex-1 min-h-0 flex flex-col">
                 <div class="flex-1 min-h-0">
                     <EditorArea ref="editorAreaRef" :panes="panes"
                         :activePaneId="activePaneId" :isMobile="isMobile"
@@ -78,7 +78,9 @@
 
         <SettingsModal :show="showSettings"
             @close="showSettings = false"
-            @saved="isRemote = getMode() !== 'local'" />
+            @saved="isRemote = getMode() !== 'local'"
+            @connected="onSSHConnected"
+            @disconnected="onSSHDisconnected" />
     </div>
 </template>
 
@@ -375,12 +377,13 @@
 .progress-fade-leave-to {
     opacity: 0;
 }
+
 </style>
 
 <script setup lang="ts">
 import type { EditorPane } from '~/components/EditorArea.vue';
 import { useLocodeConfig } from '~/composables/useLocodeConfig';
-import type { LocodeConfig, SkeletonNode } from '~/composables/useLocodeConfig';
+import type { LocodeConfig } from '~/composables/useLocodeConfig';
 
 const { loadConfig, saveConfig } = useLocodeConfig();
 const { apiFetch, getMode } = useApi();
@@ -388,14 +391,22 @@ const { apiFetch, getMode } = useApi();
 const showSettings = ref(false);
 const isRemote = import.meta.client ? ref(getMode() !== "local") : ref(false);
 
+// Electron IPC bridge for multi-window session tracking (injected by preload.cjs)
+const electronSession = import.meta.client
+    ? (window as any).electronSession as { getInitialRoot: () => string; setRoot: (path: string) => void } | undefined
+    : undefined;
+
 // --- Config state (loaded from .LoCode) ---
 const cfgOpenFolders = ref<string[]>([]);
-const cfgSkeleton = ref<SkeletonNode[]>([]);
 const cfgSplitRatio = ref(50);
 const cfgTerminalHeight = ref(261);
 
 const rootPath = ref(
-    import.meta.client ? localStorage.getItem("locode:rootPath") || "" : ""
+    import.meta.client
+        ? (electronSession
+            ? electronSession.getInitialRoot()   // Electron: session system is authoritative
+            : localStorage.getItem("locode:rootPath") || "")  // Web: use localStorage
+        : ""
 );
 const sidebarOpen = ref(false);
 const sidebarWidth = ref(250);
@@ -439,11 +450,6 @@ function onUpdateOpenFolders(folders: string[]) {
     saveConfig(rootPath.value, { openFolders: folders });
 }
 
-function onUpdateSkeleton(skeleton: SkeletonNode[]) {
-    cfgSkeleton.value = skeleton;
-    saveConfig(rootPath.value, { skeleton });
-}
-
 function onUpdateSplitRatio(ratio: number) {
     cfgSplitRatio.value = ratio;
     saveConfig(rootPath.value, { splitRatio: ratio });
@@ -467,6 +473,33 @@ function closeTerminal() {
     terminalOpen.value = false;
     saveWorkspaceConfig();
     nextTick(() => editorAreaRef.value?.focusPane(activePaneId.value));
+}
+
+// --- SSH connect/disconnect ---
+const fileExplorerRef = ref<{ showBrowse: () => void } | null>(null);
+
+function resetToFolderSelector() {
+    saveWorkspaceConfig();
+    const wasEmpty = rootPath.value === "";
+    rootPath.value = "";
+    localStorage.removeItem("locode:rootPath");
+    electronSession?.setRoot("");
+    panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+    activePaneId.value = "main";
+    lastMtime.clear();
+    if (terminalOpen.value) closeTerminal();
+    // If rootPath was already empty, the watcher won't fire — trigger browse manually
+    if (wasEmpty) {
+        fileExplorerRef.value?.showBrowse();
+    }
+}
+
+function onSSHConnected() {
+    resetToFolderSelector();
+}
+
+function onSSHDisconnected() {
+    resetToFolderSelector();
 }
 
 const editorAreaRef = ref<{ splitRatio: number; focusPane: (id: string) => void } | null>(null);
@@ -548,17 +581,20 @@ onMounted(async () => {
     ["locode:sidebarWidth", "locode:splitRatio", "locode:terminalHeight", "locode:currentFile"].forEach(k => localStorage.removeItem(k));
 
     if (rootPath.value) {
+        // Sync rootPath to Electron session tracking (covers localStorage-restored roots)
+        electronSession?.setRoot(rootPath.value);
         const config = await loadConfig(rootPath.value);
         sidebarWidth.value = config.sidebarWidth;
         cfgOpenFolders.value = config.openFolders;
-        cfgSkeleton.value = config.skeleton;
         cfgSplitRatio.value = config.splitRatio;
         cfgTerminalHeight.value = config.terminalHeight;
         await restoreWorkspace(rootPath.value, config);
     }
+    startReloadPolling();
 });
 
 onBeforeUnmount(() => {
+    if (reloadInterval) { clearInterval(reloadInterval); reloadInterval = null; }
     mq?.removeEventListener("change", onMediaChange);
     resizeCleanup?.();
     window.removeEventListener("keydown", onKeyDown);
@@ -566,6 +602,9 @@ onBeforeUnmount(() => {
 });
 
 function onKeyDown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "r") {
+        e.preventDefault();
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (!activePane.value?.filePath) return;
@@ -656,11 +695,11 @@ async function onSelectRoot(path: string) {
     const config = await loadConfig(path);
     sidebarWidth.value = config.sidebarWidth;
     cfgOpenFolders.value = config.openFolders;
-    cfgSkeleton.value = config.skeleton;
     cfgSplitRatio.value = config.splitRatio;
     cfgTerminalHeight.value = config.terminalHeight;
     rootPath.value = path;
     localStorage.setItem("locode:rootPath", path);
+    electronSession?.setRoot(path);
     restoreWorkspace(path, config);
 }
 
@@ -750,15 +789,20 @@ function onClosePane(paneId: string) {
 }
 
 function doClosePane(paneId: string) {
+    lastMtime.delete(paneId);
     if (panes.value.length > 1) {
         const remaining = panes.value.find(p => p.id !== paneId)!;
+        const oldMt = lastMtime.get(remaining.id);
+        lastMtime.delete(remaining.id);
         remaining.id = "main";
+        if (oldMt) lastMtime.set("main", oldMt);
         panes.value = [remaining];
         activePaneId.value = "main";
     } else {
         // Last pane: clear it
         const pane = panes.value[0]!;
         userEdited.delete(pane.id);
+        lastMtime.delete(pane.id);
         pane.filePath = "";
         pane.code = "";
         pane.savedCode = "";
@@ -793,6 +837,47 @@ function executePendingAction() {
     }
 }
 
+// --- File auto-reload (mtime polling) ---
+const lastMtime = new Map<string, number>();
+
+async function fetchMtime(path: string): Promise<number | null> {
+    try {
+        const res = await apiFetch("/stat?path=" + encodeURIComponent(path));
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.mtime ?? null;
+    } catch { return null; }
+}
+
+let reloadInterval: ReturnType<typeof setInterval> | null = null;
+
+function startReloadPolling() {
+    if (reloadInterval) return;
+    reloadInterval = setInterval(async () => {
+        for (const pane of panes.value) {
+            if (!pane.filePath) continue;
+            const mtime = await fetchMtime(pane.filePath);
+            if (mtime === null) continue;
+            const prev = lastMtime.get(pane.id);
+            if (prev && mtime > prev && pane.code === pane.savedCode) {
+                // File changed on disk and no unsaved edits — reload
+                try {
+                    const res = await apiFetch("/read?path=" + pane.filePath);
+                    if (res.ok) {
+                        const text = await res.text();
+                        userEdited.delete(pane.id);
+                        pane.code = text;
+                        pane.savedCode = text;
+                        lastMtime.set(pane.id, mtime);
+                    }
+                } catch {}
+            } else if (!prev || mtime > prev) {
+                lastMtime.set(pane.id, mtime);
+            }
+        }
+    }, 2000);
+}
+
 // --- File I/O ---
 async function loadFileIntoPane(paneId: string, path: string) {
     const pane = panes.value.find(p => p.id === paneId);
@@ -822,6 +907,7 @@ async function loadFileIntoPane(paneId: string, path: string) {
     } finally {
         loadingPaneId.value = null;
     }
+    fetchMtime(path).then(mt => { if (mt !== null) lastMtime.set(paneId, mt); });
     saveWorkspaceConfig();
 }
 
@@ -841,6 +927,7 @@ async function savePaneFile(paneId: string) {
             console.error("Save failed:", await res.text());
         } else {
             pane.savedCode = pane.code;
+            fetchMtime(pane.filePath).then(mt => { if (mt !== null) lastMtime.set(paneId, mt); });
         }
     } catch {
         console.error("Network error: unable to save file");

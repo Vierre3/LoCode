@@ -1,12 +1,12 @@
 "use strict";
-const { app, BrowserWindow, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, Menu, nativeImage } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
 const os = require("os");
 
-// Prevent multiple instances — second launch focuses the existing window instead
+// Single instance: second launch creates a new window in the existing process
 if (!app.requestSingleInstanceLock()) {
     app.quit();
     process.exit(0);
@@ -24,10 +24,41 @@ const filesRoot = isPacked
     : root;
 
 const nuxtEntry = path.join(filesRoot, ".output", "server", "index.mjs");
+const iconPath = path.join(__dirname, "icon.png");
 
 let nuxtPort = null;
 let nuxtProc = null;
-let win = null;
+
+// ── Multi-window session tracking ────────────────────────────────────
+// Map<BrowserWindow, rootPath string>
+const windows = new Map();
+const sessionsFile = path.join(app.getPath("userData"), "sessions.json");
+
+function loadSessions() {
+    try {
+        if (fs.existsSync(sessionsFile)) {
+            const data = JSON.parse(fs.readFileSync(sessionsFile, "utf-8"));
+            if (Array.isArray(data)) return data;
+        }
+    } catch {}
+    return [];
+}
+
+function saveSessions() {
+    const roots = [];
+    for (const rootVal of windows.values()) {
+        roots.push(rootVal || "");
+    }
+    try {
+        fs.writeFileSync(sessionsFile, JSON.stringify(roots), "utf-8");
+        log(`[session] saved ${roots.length} session(s)`);
+    } catch (err) {
+        log(`[session] save error: ${err.message}`);
+    }
+}
+
+// Track which window owns which terminal (for IPC routing)
+const terminalOwner = new Map(); // terminal id → BrowserWindow
 
 // ── Logging ──────────────────────────────────────────────────────────
 const logPath = path.join(app.getPath("userData"), "locode.log");
@@ -86,13 +117,16 @@ function waitForPort(port, retries = 40, delay = 250) {
     });
 }
 
-function createWindow() {
-    win = new BrowserWindow({
+let isQuitting = false;
+
+function createWindow(rootPath) {
+    const win = new BrowserWindow({
         width: 1280,
         height: 800,
         minWidth: 600,
         minHeight: 400,
         title: "LoCode",
+        icon: iconPath,
         backgroundColor: "#0d1117",
         webPreferences: {
             nodeIntegration: false,
@@ -100,6 +134,9 @@ function createWindow() {
             preload: path.join(__dirname, "preload.cjs"),
         },
     });
+
+    windows.set(win, rootPath || "");
+    log(`[window] created (root=${rootPath || "<none>"}, total=${windows.size})`);
 
     // Log page load events for debugging
     win.webContents.on("did-fail-load", (e, code, desc, url) => {
@@ -112,7 +149,10 @@ function createWindow() {
         log(`[window:console] [${level}] ${msg}`);
     });
 
-    win.loadURL(`http://127.0.0.1:${nuxtPort}`);
+    const url = rootPath
+        ? `http://127.0.0.1:${nuxtPort}?root=${encodeURIComponent(rootPath)}`
+        : `http://127.0.0.1:${nuxtPort}`;
+    win.loadURL(url);
 
     // Open external links in the system browser, not in the Electron window
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -120,11 +160,18 @@ function createWindow() {
         return { action: "deny" };
     });
 
-    win.on("closed", () => { win = null; });
+    win.on("closed", () => {
+        windows.delete(win);
+        log(`[window] closed (remaining=${windows.size})`);
+        // Save sessions on each individual close (unless app is quitting — handled in will-quit)
+        if (!isQuitting) saveSessions();
+    });
+
+    return win;
 }
 
 function showError(message) {
-    win = new BrowserWindow({
+    const win = new BrowserWindow({
         width: 700,
         height: 500,
         title: "LoCode — Error",
@@ -136,13 +183,22 @@ function showError(message) {
         <p style="color:#888;margin-top:2em">Log file: ${logPath.replace(/</g, "&lt;")}</p>
         </body></html>`;
     win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
-    win.on("closed", () => { win = null; });
 }
 
+// Second launch: create a new window in the existing process
 app.on("second-instance", () => {
-    if (win) {
-        if (win.isMinimized()) win.restore();
-        win.focus();
+    createWindow();
+});
+
+// ── Session root tracking (renderer notifies main when rootPath changes) ──
+ipcMain.on("session:setRoot", (event, rootPath) => {
+    for (const [win, _] of windows) {
+        if (!win.isDestroyed() && win.webContents === event.sender) {
+            windows.set(win, rootPath || "");
+            log(`[session] window root updated: ${rootPath}`);
+            saveSessions();
+            break;
+        }
     }
 });
 
@@ -197,17 +253,30 @@ ipcMain.handle("term:create", (_event, { id, cols, rows, cwd }) => {
 
         terminals.set(id, term);
 
+        // Find the window that created this terminal
+        let ownerWin = null;
+        for (const [w] of windows) {
+            if (!w.isDestroyed() && w.webContents === _event.sender) {
+                ownerWin = w;
+                break;
+            }
+        }
+        terminalOwner.set(id, ownerWin);
+
         term.onData((data) => {
-            if (win && !win.isDestroyed()) {
-                win.webContents.send("term:data", { id, data });
+            const w = terminalOwner.get(id);
+            if (w && !w.isDestroyed()) {
+                w.webContents.send("term:data", { id, data });
             }
         });
 
         term.onExit(({ exitCode }) => {
-            if (win && !win.isDestroyed()) {
-                win.webContents.send("term:exit", { id, code: exitCode });
+            const w = terminalOwner.get(id);
+            if (w && !w.isDestroyed()) {
+                w.webContents.send("term:exit", { id, code: exitCode });
             }
             terminals.delete(id);
+            terminalOwner.delete(id);
         });
 
         return { ok: true };
@@ -228,9 +297,49 @@ ipcMain.on("term:resize", (_event, { id, cols, rows }) => {
 ipcMain.on("term:kill", (_event, { id }) => {
     try { terminals.get(id)?.kill(); } catch {}
     terminals.delete(id);
+    terminalOwner.delete(id);
 });
 
 app.whenReady().then(async () => {
+    // ── Application menu (enables "New Window" in dock right-click on macOS) ──
+    const isMac = process.platform === "darwin";
+    const template = [
+        ...(isMac ? [{ role: "appMenu" }] : []),
+        {
+            label: "File",
+            submenu: [
+                { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
+                { type: "separator" },
+                isMac ? { role: "close" } : { role: "quit" },
+            ],
+        },
+        { role: "editMenu" },
+        {
+            label: "View",
+            submenu: [
+                { role: "reload" },
+                { role: "forceReload" },
+                { role: "toggleDevTools" },
+                { type: "separator" },
+                { role: "resetZoom" },
+                { role: "zoomIn" },
+                { role: "zoomOut" },
+                { type: "separator" },
+                { role: "togglefullscreen" },
+            ],
+        },
+        { role: "windowMenu" },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+
+    // macOS dock: right-click menu with "New Window" + dock icon
+    if (isMac && app.dock) {
+        app.dock.setMenu(Menu.buildFromTemplate([
+            { label: "New Window", click: () => createWindow() },
+        ]));
+        app.dock.setIcon(nativeImage.createFromPath(iconPath));
+    }
+
     nuxtPort = await getFreePort();
     log(`[main] Assigned port: nuxt=${nuxtPort}`);
 
@@ -238,8 +347,18 @@ app.whenReady().then(async () => {
 
     try {
         await waitForPort(nuxtPort);
-        log("[main] Nuxt server is ready, creating window");
-        createWindow();
+        log("[main] Nuxt server is ready, creating window(s)");
+
+        // Restore previous sessions or create a single default window
+        const savedSessions = loadSessions();
+        if (savedSessions.length > 0) {
+            log(`[session] restoring ${savedSessions.length} session(s)`);
+            for (const rootVal of savedSessions) {
+                createWindow(rootVal || undefined);
+            }
+        } else {
+            createWindow();
+        }
     } catch (err) {
         log(`[main] Nuxt server did not start: ${err.message}`);
         logStream.end();
@@ -252,11 +371,18 @@ app.whenReady().then(async () => {
     });
 });
 
+// before-quit fires BEFORE windows start closing — save sessions while the map is still populated
+app.on("before-quit", () => {
+    isQuitting = true;
+    saveSessions();
+});
+
 app.on("will-quit", () => {
     for (const term of terminals.values()) {
         try { term.kill(); } catch {}
     }
     terminals.clear();
+    terminalOwner.clear();
     try { nuxtProc?.kill(); } catch {}
 });
 

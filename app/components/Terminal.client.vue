@@ -24,12 +24,18 @@ const props = defineProps<{
     focused: boolean;
 }>();
 
+const { getWsUrl, getMode } = useApi();
+
 const termContainer = ref<HTMLDivElement | null>(null);
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let ws: WebSocket | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let ipcCleanups: (() => void)[] = [];
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let disposed = false;
+// Use local node-pty only in Electron + local mode; SSH mode always uses WebSocket
+const useLocalPty = !!electronTerminal && getMode() === "local";
 
 // Unique ID for this terminal instance (used for IPC routing)
 const termId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -50,6 +56,54 @@ function doFit() {
             term.resize(term.cols + extra, term.rows);
         }
     }
+}
+
+function connectWs() {
+    if (disposed || !term) return;
+    ws = new WebSocket(getWsUrl());
+
+    ws.onopen = () => {
+        ws!.send(JSON.stringify({
+            type: "create",
+            cwd: props.cwd || undefined,
+            cols: term!.cols,
+            rows: term!.rows,
+        }));
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "output" && term) {
+                term.write(msg.data);
+            } else if (msg.type === "exit" && term) {
+                term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
+            }
+        } catch {
+            // Ignore malformed messages
+        }
+    };
+
+    ws.onclose = () => {
+        if (disposed) return;
+        if (term) {
+            term.write("\r\n\x1b[90m[Connection lost — reconnecting...]\x1b[0m\r\n");
+        }
+        ws = null;
+        scheduleWsReconnect();
+    };
+
+    ws.onerror = () => {
+        // onclose will fire after onerror, reconnect handled there
+    };
+}
+
+function scheduleWsReconnect() {
+    if (disposed || wsReconnectTimer) return;
+    wsReconnectTimer = setTimeout(() => {
+        wsReconnectTimer = null;
+        if (!disposed) connectWs();
+    }, 5000);
 }
 
 onMounted(async () => {
@@ -73,11 +127,22 @@ onMounted(async () => {
     term.loadAddon(new WebLinksAddon());
     term.open(termContainer.value);
 
-    await nextTick();
+    // Wait until the container has real dimensions before fitting and spawning the PTY.
+    // On first load, the terminal panel may not be laid out yet (0 height).
+    await new Promise<void>((resolve) => {
+        const check = () => {
+            if (!termContainer.value) return resolve();
+            const { offsetWidth, offsetHeight } = termContainer.value;
+            if (offsetWidth > 0 && offsetHeight > 0) return resolve();
+            requestAnimationFrame(check);
+        };
+        check();
+    });
+
     doFit();
 
-    if (electronTerminal) {
-        // ── Electron mode: IPC to main process (node-pty runs there) ──
+    if (useLocalPty) {
+        // ── Electron mode (local): IPC to main process (node-pty runs there) ──
         ipcCleanups.push(
             electronTerminal.onData(({ id, data }) => {
                 if (id === termId && term) term.write(data);
@@ -100,47 +165,10 @@ onMounted(async () => {
             term.write(`\r\n\x1b[31m[Terminal error: ${result.error}]\x1b[0m\r\n`);
         }
 
-        // Re-fit after PTY creation in case container wasn't at final size
-        setTimeout(() => {
-            if (fitAddon && term && electronTerminal) {
-                doFit();
-                electronTerminal.resize(termId, term.cols, term.rows);
-            }
-        }, 200);
-
         term.onData((data) => electronTerminal!.write(termId, data));
     } else {
-        // ── Web mode: WebSocket to Nuxt server / SSH backend ──
-        const { getWsUrl } = useApi();
-        ws = new WebSocket(getWsUrl());
-
-        ws.onopen = () => {
-            ws!.send(JSON.stringify({
-                type: "create",
-                cwd: props.cwd || undefined,
-                cols: term!.cols,
-                rows: term!.rows,
-            }));
-        };
-
-        ws.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                if (msg.type === "output" && term) {
-                    term.write(msg.data);
-                } else if (msg.type === "exit" && term) {
-                    term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
-                }
-            } catch {
-                // Ignore malformed messages
-            }
-        };
-
-        ws.onclose = () => {
-            if (term) {
-                term.write("\r\n\x1b[90m[Connection closed]\x1b[0m\r\n");
-            }
-        };
+        // ── Web mode or SSH: WebSocket to Nuxt server / SSH backend ──
+        connectWs();
 
         term.onData((data) => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -149,9 +177,9 @@ onMounted(async () => {
         });
     }
 
-    // Let Ctrl+J and Ctrl+S bubble up to the window handler
+    // Let Ctrl+J, Ctrl+S, Ctrl+R bubble up to the window handler
     term.attachCustomKeyEventHandler((event) => {
-        if ((event.ctrlKey || event.metaKey) && (event.key === "j" || event.key === "s")) {
+        if ((event.ctrlKey || event.metaKey) && (event.key === "j" || event.key === "s" || event.key === "r")) {
             return false;
         }
         return true;
@@ -163,8 +191,8 @@ onMounted(async () => {
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
         doFit();
-        if (electronTerminal) {
-            electronTerminal.resize(termId, term.cols, term.rows);
+        if (useLocalPty) {
+            electronTerminal!.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
         }
@@ -191,11 +219,13 @@ watch(() => props.active, (active) => {
 });
 
 onBeforeUnmount(() => {
+    disposed = true;
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
     resizeObserver?.disconnect();
     ipcCleanups.forEach((fn) => fn());
     ipcCleanups = [];
-    if (electronTerminal) {
-        electronTerminal.kill(termId);
+    if (useLocalPty) {
+        electronTerminal!.kill(termId);
     }
     if (ws) {
         ws.close();

@@ -4,14 +4,7 @@
             {{ browsing ? 'Select Folder' : 'Open Folder' }}
         </button>
         <div class="overflow-y-auto overflow-x-hidden flex-1 p-1">
-            <div v-if="treeLoading" class="tree-skeleton">
-                <div v-for="(node, i) in skeletonBlueprint" :key="i" class="skeleton-row"
-                    :style="{ paddingLeft: node.depth * 20 + 'px' }">
-                    <span class="skeleton-icon"></span>
-                    <div class="skeleton-node" :style="{ width: node.width + '%' }"></div>
-                </div>
-            </div>
-            <FileTree v-else :nodes="tree" :openFiles="openFiles" :folder="folder" :onClick="click"
+            <FileTree v-if="tree.length" :nodes="tree" :openFiles="openFiles" :folder="folder" :onClick="click"
                 :onSelect="browsing ? selectFolder : undefined" />
         </div>
         <Teleport to="body">
@@ -74,47 +67,6 @@
     }
 }
 
-.tree-skeleton {
-    padding: 4px 2px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.skeleton-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.skeleton-icon {
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.07);
-    animation: shimmer 1.4s ease infinite;
-    background: linear-gradient(
-        90deg,
-        rgba(255, 255, 255, 0.04) 0%,
-        rgba(255, 255, 255, 0.1) 50%,
-        rgba(255, 255, 255, 0.04) 100%
-    );
-    background-size: 200% 100%;
-}
-
-.skeleton-node {
-    height: 12px;
-    border-radius: 3px;
-    background: linear-gradient(
-        90deg,
-        rgba(255, 255, 255, 0.05) 0%,
-        rgba(255, 255, 255, 0.12) 50%,
-        rgba(255, 255, 255, 0.05) 100%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.4s ease infinite;
-}
 </style>
 
 <style lang="css">
@@ -138,55 +90,23 @@
 </style>
 
 <script setup lang="ts">
-import type { SkeletonNode } from '~/composables/useLocodeConfig'
-import { DEFAULT_SKELETON } from '~/composables/useLocodeConfig'
 const { apiFetch } = useApi()
 
 const props = defineProps<{
     openFiles: string[];
     rootPath: string;
     initialOpenFolders?: string[];
-    initialSkeleton?: SkeletonNode[];
 }>();
 const emit = defineEmits<{
     (e: "select-file", path: string): void,
     (e: "select-root", path: string): void,
     (e: "update:openFolders", folders: string[]): void,
-    (e: "update:skeleton", skeleton: SkeletonNode[]): void,
 }>();
 
 const tree = ref<any[]>([]);
 const folder = ref("");
 const browsing = ref(false);
 const treeLoading = ref(false);
-
-// --- Skeleton blueprint ---
-function readSkeletonFromProps(): SkeletonNode[] {
-    if (props.initialSkeleton && props.initialSkeleton.length > 0) return props.initialSkeleton;
-    return DEFAULT_SKELETON;
-}
-
-const skeletonBlueprint = ref<SkeletonNode[]>(readSkeletonFromProps());
-
-function flattenTree(nodes: any[], depth = 0): SkeletonNode[] {
-    const result: SkeletonNode[] = [];
-    for (const node of nodes) {
-        const nameLen = Math.min(node.name?.length || 5, 20);
-        result.push({ depth, type: node.type, width: 25 + nameLen * 3 });
-        if (node.type === "dir" && node.open && node.children) {
-            result.push(...flattenTree(node.children, depth + 1));
-        }
-    }
-    return result;
-}
-
-function saveSkeletonBlueprint() {
-    if (!props.rootPath) return;
-    const blueprint = flattenTree(tree.value);
-    if (blueprint.length > 0) {
-        emit("update:skeleton", blueprint);
-    }
-}
 
 // --- Tooltip ---
 const hoveredRawPath = ref("");
@@ -249,7 +169,6 @@ async function loadWorkTree() {
             const openPaths = new Set<string>(props.initialOpenFolders);
             await restoreOpenFolders(tree.value, openPaths);
         }
-        saveSkeletonBlueprint();
     } finally {
         treeLoading.value = false;
     }
@@ -277,8 +196,8 @@ async function loadBrowseTree() {
 
         if (!homePath) return;
 
-        // Expand each path segment down to the home dir (e.g. / → Users → py)
-        const segments = homePath.split("/").filter(Boolean); // ["Users", "py"] or ["home", "py"]
+        // Expand each path segment down to the home dir (e.g. / → Users → toto)
+        const segments = homePath.split("/").filter(Boolean); // ["Users", "toto"] or ["home", "toto"]
         let currentNodes = tree.value;
         let currentPath = "";
         for (const seg of segments) {
@@ -295,6 +214,7 @@ async function loadBrowseTree() {
 }
 
 function toggleBrowse() {
+    hoveredRawPath.value = "";
     if (browsing.value && props.rootPath) {
         browsing.value = false;
         loadWorkTree();
@@ -305,6 +225,7 @@ function toggleBrowse() {
 }
 
 function selectFolder(node: any) {
+    hoveredRawPath.value = "";
     browsing.value = false;
     if (node.path === props.rootPath) {
         loadWorkTree();
@@ -331,7 +252,6 @@ async function click(node: any) {
                 node.loading = false;
             }
             saveOpenFolders();
-            saveSkeletonBlueprint();
         } else
             emit("select-file", node.path);
     }
@@ -347,14 +267,11 @@ function onEscape(e: KeyboardEvent) {
 watch(() => props.rootPath, (newPath) => {
     if (newPath) {
         browsing.value = false;
-        skeletonBlueprint.value = readSkeletonFromProps();
         loadWorkTree();
+    } else {
+        browsing.value = true;
+        loadBrowseTree();
     }
-});
-
-// When parent pushes fresh config values (workspace switch), update skeleton
-watch(() => props.initialSkeleton, (val) => {
-    if (val && val.length > 0) skeletonBlueprint.value = val;
 });
 
 // One-shot: re-apply open folders when config loads after the tree is already mounted
@@ -364,11 +281,9 @@ const unwatchInitialFolders = watch(() => props.initialOpenFolders, async (newVa
     if (!newVal?.length || oldVal?.length || treeLoading.value || !tree.value.length) return;
     unwatchInitialFolders();
     await restoreOpenFolders(tree.value, new Set(newVal));
-    saveSkeletonBlueprint();
 }, { immediate: false });
 
 onMounted(async () => {
-    skeletonBlueprint.value = readSkeletonFromProps();
     treeLoading.value = true;
     if (!props.rootPath) {
         browsing.value = true;
@@ -381,5 +296,12 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
     window.removeEventListener("keydown", onEscape);
+});
+
+defineExpose({
+    showBrowse() {
+        browsing.value = true;
+        loadBrowseTree();
+    },
 });
 </script>

@@ -3,10 +3,17 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+// Callback to clean up SSH terminal channels on connection drop
+let onConnectionLost: (() => void) | null = null;
+export function setOnConnectionLost(cb: () => void) { onConnectionLost = cb; }
+
 let client: Client | null = null;
 let sftp: SFTPWrapper | null = null;
 let remoteHome = "/home";
 let connectedHost = "";
+let lastConnectOpts: { host: string; port: number; username: string; password?: string } | null = null;
+let reconnecting = false;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 function findPrivateKey(): Buffer | null {
     const sshDir = join(homedir(), ".ssh");
@@ -64,6 +71,8 @@ export async function sshConnect(opts: {
         conn.on("ready", () => {
             client = conn;
             connectedHost = opts.host;
+            lastConnectOpts = { host: opts.host, port: opts.port || 22, username: opts.username, password: opts.password };
+            reconnecting = false;
 
             // Discover remote home directory
             conn.exec("echo $HOME", (err, stream) => {
@@ -87,8 +96,49 @@ export async function sshConnect(opts: {
             reject(new Error(`SSH connection failed: ${err.message}`));
         });
 
+        // Auto-reconnect on unexpected close
+        conn.on("close", () => {
+            if (client === conn) {
+                client = null;
+                sftp = null;
+                onConnectionLost?.();
+                scheduleReconnect();
+            }
+        });
+
+        conn.on("end", () => {
+            if (client === conn) {
+                client = null;
+                sftp = null;
+                onConnectionLost?.();
+                scheduleReconnect();
+            }
+        });
+
         conn.connect(config);
     });
+}
+
+function scheduleReconnect() {
+    // Only auto-reconnect if we had a successful connection before and weren't explicitly disconnected
+    if (!lastConnectOpts || reconnecting || reconnectTimer) return;
+    reconnecting = true;
+    console.log("[SSH] Connection lost, will attempt reconnect in 5s...");
+    reconnectTimer = setTimeout(async () => {
+        reconnectTimer = null;
+        if (client) { reconnecting = false; return; } // Already reconnected
+        if (!lastConnectOpts) { reconnecting = false; return; }
+        try {
+            console.log("[SSH] Attempting reconnect...");
+            await sshConnect(lastConnectOpts);
+            console.log("[SSH] Reconnected successfully");
+        } catch (err: any) {
+            console.log("[SSH] Reconnect failed:", err.message);
+            // Will retry on next scheduleReconnect triggered by close/end
+            reconnecting = false;
+            scheduleReconnect();
+        }
+    }, 5000);
 }
 
 function setupSftp(
@@ -107,6 +157,10 @@ function setupSftp(
 }
 
 export function sshDisconnect() {
+    // Clear reconnect state — explicit disconnect should not auto-reconnect
+    lastConnectOpts = null;
+    reconnecting = false;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (client) {
         try { client.end(); } catch {}
         client = null;
@@ -134,4 +188,37 @@ export function getRemoteHome(): string {
 
 export function getConnectedHost(): string {
     return connectedHost;
+}
+
+export function isSSHReconnecting(): boolean {
+    return reconnecting;
+}
+
+/**
+ * Create a dedicated SSH connection for a terminal session.
+ * Each terminal gets its own connection to avoid the MaxSessions limit
+ * on the shared SFTP connection.
+ */
+export function createTerminalConnection(): Promise<Client> {
+    if (!lastConnectOpts) {
+        return Promise.reject(new Error("SSH not connected"));
+    }
+    const opts = lastConnectOpts;
+    return new Promise((resolve, reject) => {
+        const conn = new Client();
+        const config: ConnectConfig = {
+            host: opts.host,
+            port: opts.port || 22,
+            username: opts.username,
+            agent: process.env.SSH_AUTH_SOCK,
+            readyTimeout: 10000,
+        };
+        const privateKey = findPrivateKey();
+        if (privateKey) config.privateKey = privateKey;
+        if (opts.password) config.password = opts.password;
+
+        conn.on("ready", () => resolve(conn));
+        conn.on("error", (err) => reject(new Error(`SSH terminal connection failed: ${err.message}`)));
+        conn.connect(config);
+    });
 }
