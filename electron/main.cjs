@@ -354,11 +354,12 @@ function getExpectedMacScript() {
     ].join("\n") + "\n";
 }
 
+const cliDeclinedFile = path.join(app.getPath("userData"), ".cli-declined");
+
 function installCLI() {
     if (!isPacked) return;
 
     const platform = process.platform;
-    const { execSync } = require("child_process");
 
     if (platform === "darwin") {
         const target = "/usr/local/bin/locode";
@@ -370,6 +371,9 @@ function installCLI() {
                 return;
             }
         } catch {}
+
+        // User previously declined — don't ask again
+        if (fs.existsSync(cliDeclinedFile)) return;
 
         try {
             // Write script to a temp file, then sudo-copy it (avoids shell escaping)
@@ -386,7 +390,9 @@ function installCLI() {
             try { fs.unlinkSync(tmpFile); } catch {}
             log("[cli] installed /usr/local/bin/locode");
         } catch (err) {
-            log(`[cli] macOS install cancelled or failed: ${err.message}`);
+            // User cancelled — remember their choice so we don't ask again
+            try { fs.writeFileSync(cliDeclinedFile, new Date().toISOString()); } catch {}
+            log(`[cli] macOS install declined or failed: ${err.message}`);
         }
     } else if (platform === "win32") {
         const appDir = path.dirname(process.execPath);
