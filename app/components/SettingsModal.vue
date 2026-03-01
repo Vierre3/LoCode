@@ -355,9 +355,8 @@ async function disconnect() {
     cursor: pointer;
     color: rgba(255, 255, 255, 0.9);
     border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 0 0 transparent;
     transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
-        background 0.15s ease, box-shadow 0.25s ease, border-color 0.15s ease;
+        background 0.15s ease, border-color 0.15s ease;
 }
 .dialog-btn:disabled {
     opacity: 0.4;
