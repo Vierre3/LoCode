@@ -14,6 +14,23 @@ if (!app.requestSingleInstanceLock()) {
 
 const isPacked = app.isPackaged;
 
+// ── CLI argument: `locode /path/to/dir` opens with that directory ────
+function parseDirArg(argv) {
+    // In dev: ['electron', '.', '/path'] → skip 2; packed: ['/app', '/path'] → skip 1
+    const skip = isPacked ? 1 : 2;
+    for (let i = skip; i < argv.length; i++) {
+        const arg = argv[i];
+        if (arg.startsWith("-")) continue; // skip flags
+        const resolved = path.resolve(arg);
+        try {
+            if (fs.statSync(resolved).isDirectory()) return resolved;
+        } catch {}
+    }
+    return null;
+}
+
+const cliRoot = parseDirArg(process.argv);
+
 // In dev:    __dirname = <project>/electron → root = <project>
 // In packed: __dirname = <app>/Resources/app.asar/electron → root = app.asar
 const root = path.join(__dirname, "..");
@@ -185,9 +202,17 @@ function showError(message) {
     win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
 
-// Second launch: create a new window in the existing process
-app.on("second-instance", () => {
-    createWindow();
+// Second launch: create a new window in the existing process (with optional dir arg)
+app.on("second-instance", (_event, argv) => {
+    const dirArg = parseDirArg(argv);
+    createWindow(dirArg || undefined);
+    // Focus the most recent window
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+        const w = wins[wins.length - 1];
+        if (w.isMinimized()) w.restore();
+        w.focus();
+    }
 });
 
 // ── Session root tracking (renderer notifies main when rootPath changes) ──
@@ -349,15 +374,21 @@ app.whenReady().then(async () => {
         await waitForPort(nuxtPort);
         log("[main] Nuxt server is ready, creating window(s)");
 
-        // Restore previous sessions or create a single default window
-        const savedSessions = loadSessions();
-        if (savedSessions.length > 0) {
-            log(`[session] restoring ${savedSessions.length} session(s)`);
-            for (const rootVal of savedSessions) {
-                createWindow(rootVal || undefined);
-            }
+        // CLI argument takes priority over session restore
+        if (cliRoot) {
+            log(`[main] Opening directory from CLI arg: ${cliRoot}`);
+            createWindow(cliRoot);
         } else {
-            createWindow();
+            // Restore previous sessions or create a single default window
+            const savedSessions = loadSessions();
+            if (savedSessions.length > 0) {
+                log(`[session] restoring ${savedSessions.length} session(s)`);
+                for (const rootVal of savedSessions) {
+                    createWindow(rootVal || undefined);
+                }
+            } else {
+                createWindow();
+            }
         }
     } catch (err) {
         log(`[main] Nuxt server did not start: ${err.message}`);
