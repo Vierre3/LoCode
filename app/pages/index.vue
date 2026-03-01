@@ -194,7 +194,7 @@
     white-space: nowrap;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
     transform: translateZ(0) translateY(-2px);
     border-color: rgba(255, 255, 255, 0.37);
     box-shadow: 0 0 14px rgba(180, 210, 255, 0.3);
@@ -202,8 +202,9 @@
 
 .btn:disabled {
     opacity: 0.4;
-    cursor: default;
+    cursor: not-allowed;
     transform: none;
+    pointer-events: auto;
 }
 
 .btn-press {
