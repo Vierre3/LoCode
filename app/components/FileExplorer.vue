@@ -196,8 +196,8 @@ async function loadBrowseTree() {
 
         if (!homePath) return;
 
-        // Expand each path segment down to the home dir (e.g. / → Users → toto)
-        const segments = homePath.split("/").filter(Boolean); // ["Users", "toto"] or ["home", "toto"]
+        // Expand each path segment down to the home dir (e.g. / → home → toto)
+        const segments = homePath.split("/").filter(Boolean);
         let currentNodes = tree.value;
         let currentPath = "";
         for (const seg of segments) {

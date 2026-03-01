@@ -1,0 +1,32 @@
+#!/bin/sh
+# Launcher for LoCode — resolves relative paths and launches the Electron app.
+# Usage: locode [directory]
+#   locode .            → open current directory
+#   locode /home/user   → open specific directory
+#   locode              → open normally (restore last session)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Resolve the directory argument to an absolute path
+DIR=""
+if [ -n "$1" ] && [ -d "$1" ]; then
+    DIR="$(cd "$1" && pwd)"
+fi
+
+# Look for the AppImage first, then fall back to electron dev mode
+APPIMAGE="$(find "$SCRIPT_DIR/dist" -maxdepth 1 -name '*.AppImage' -type f 2>/dev/null | head -1)"
+
+if [ -n "$APPIMAGE" ]; then
+    if [ -n "$DIR" ]; then
+        exec "$APPIMAGE" "$DIR" "$@"
+    else
+        exec "$APPIMAGE" "$@"
+    fi
+else
+    # Dev mode: build and run with electron
+    if [ -n "$DIR" ]; then
+        exec npx electron "$SCRIPT_DIR/electron/main.cjs" "$DIR"
+    else
+        exec npx electron "$SCRIPT_DIR/electron/main.cjs"
+    fi
+fi
