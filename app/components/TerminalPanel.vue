@@ -38,12 +38,14 @@
                 </div>
             </div>
             <div v-if="!isMobile" class="terminal-sidebar">
-                <div v-for="s in sessions" :key="s.id"
-                    class="terminal-tab" :class="{ active: s.id === focusedId, split: splitId && (s.id === activeId || s.id === splitId) && s.id !== focusedId }"
-                    draggable="true"
-                    @dragstart="e => onTabDragStart(e, s.id)"
-                    @click="selectSession(s.id)">
-                    {{ s.name }}
+                <div class="terminal-tabs-scroll">
+                    <div v-for="s in sessions" :key="s.id"
+                        class="terminal-tab" :class="{ active: s.id === focusedId, split: splitId && (s.id === activeId || s.id === splitId) && s.id !== focusedId }"
+                        draggable="true"
+                        @dragstart="e => onTabDragStart(e, s.id)"
+                        @click="selectSession(s.id)">
+                        {{ s.name }}
+                    </div>
                 </div>
                 <div class="terminal-sidebar-actions">
                     <button class="sidebar-btn add" @click="addSession" title="New terminal"><span class="add-icon">+</span></button>
@@ -604,9 +606,17 @@ onBeforeUnmount(() => {
     border-left: 1px solid rgba(255, 255, 255, 0.08);
     padding: 4px;
     gap: 2px;
-    overflow-y: auto;
     background: #1e1e1e;
     z-index: 2;
+}
+
+.terminal-tabs-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .terminal-tab {
@@ -639,7 +649,7 @@ onBeforeUnmount(() => {
 }
 
 .terminal-sidebar-actions {
-    margin-top: auto;
+    flex-shrink: 0;
     display: flex;
     gap: 2px;
     padding-top: 4px;

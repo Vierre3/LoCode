@@ -268,6 +268,9 @@ watch(() => props.rootPath, (newPath) => {
     if (newPath) {
         browsing.value = false;
         loadWorkTree();
+    } else {
+        browsing.value = true;
+        loadBrowseTree();
     }
 });
 

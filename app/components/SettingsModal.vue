@@ -17,7 +17,7 @@
                                     v-model="sshHost"
                                     class="field-input"
                                     type="text"
-                                    placeholder="192.168.1.5"
+                                    placeholder="192.168.0.1"
                                     spellcheck="false"
                                 />
                             </div>
@@ -39,7 +39,7 @@
                                     v-model="sshUsername"
                                     class="field-input"
                                     type="text"
-                                    placeholder="py"
+                                    placeholder="toto"
                                     spellcheck="false"
                                 />
                             </div>
