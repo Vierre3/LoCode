@@ -55,12 +55,12 @@
       "electron/**/*",
       ".output/**/*",
       "!**/*.map",
-      "!**/test/**",
-      "!**/tests/**",
-      "!**/*.md",
-      "!**/.github/**",
-      "!**/CHANGELOG*",
-      "!**/LICENSE*"
+      "!**/node_modules/**/test/**",
+      "!**/node_modules/**/tests/**",
+      "!**/node_modules/**/*.md",
+      "!**/node_modules/**/.github/**",
+      "!**/node_modules/**/CHANGELOG*",
+      "!**/node_modules/**/LICENSE*"
     ],
     "mac": {
       "target": [
