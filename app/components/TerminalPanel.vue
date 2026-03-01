@@ -614,9 +614,24 @@ onBeforeUnmount(() => {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     gap: 2px;
+}
+
+.terminal-tabs-scroll::-webkit-scrollbar {
+    width: 3px;
+}
+.terminal-tabs-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.terminal-tabs-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
+.terminal-tabs-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
 }
 
 .terminal-tab {
@@ -630,6 +645,7 @@ onBeforeUnmount(() => {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex-shrink: 0;
 }
 
 .terminal-tab:hover {

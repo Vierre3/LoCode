@@ -1,14 +1,16 @@
 import { defineWebSocketHandler } from "h3";
+import type { Client } from "ssh2";
 
-const channels = new Map<string, any>();
+// Each terminal gets its own dedicated SSH connection + shell channel
+const terminalConns = new Map<string, { conn: Client; stream: any }>();
 
-// Clean up ALL stale channels when the SSH connection drops/reconnects
-// This frees MaxSessions slots on the SSH server
+// Clean up ALL stale terminals when the main SSH connection drops/reconnects
 export function cleanupAllChannels() {
-    for (const [id, stream] of channels) {
+    for (const [id, { conn, stream }] of terminalConns) {
         try { stream.close(); } catch {}
+        try { conn.end(); } catch {}
     }
-    channels.clear();
+    terminalConns.clear();
 }
 
 export default defineWebSocketHandler({
@@ -25,10 +27,9 @@ export default defineWebSocketHandler({
         }
 
         if (data.type === "create") {
-            if (channels.has(peer.id)) return;
+            if (terminalConns.has(peer.id)) return;
 
-            const client = getSSHClient();
-            if (!client) {
+            if (!isSSHConnected()) {
                 try {
                     peer.send(JSON.stringify({ type: "output", data: "\r\n\x1b[31m[SSH not connected]\x1b[0m\r\n" }));
                 } catch {}
@@ -38,71 +39,96 @@ export default defineWebSocketHandler({
             const cols = data.cols || 80;
             const rows = data.rows || 24;
 
-            client.shell(
-                {
-                    term: "xterm-256color",
-                    cols,
-                    rows,
-                },
-                (err: Error | undefined, stream: any) => {
-                    if (err) {
-                        try {
-                            peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[SSH shell error: ${err.message}]\x1b[0m\r\n` }));
-                        } catch {}
-                        return;
-                    }
+            // Create a dedicated SSH connection for this terminal
+            createTerminalConnection()
+                .then((conn) => {
+                    conn.shell(
+                        {
+                            term: "xterm-256color",
+                            cols,
+                            rows,
+                        },
+                        (err: Error | undefined, stream: any) => {
+                            if (err) {
+                                try {
+                                    peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[SSH shell error: ${err.message}]\x1b[0m\r\n` }));
+                                } catch {}
+                                try { conn.end(); } catch {}
+                                return;
+                            }
 
-                    channels.set(peer.id, stream);
+                            terminalConns.set(peer.id, { conn, stream });
 
-                    stream.on("data", (chunk: Buffer) => {
-                        try {
-                            peer.send(JSON.stringify({ type: "output", data: chunk.toString() }));
-                        } catch {
-                            // Peer disconnected
-                        }
-                    });
+                            // If cwd is set, mute output until the cd+clear has finished
+                            let muted = !!data.cwd;
 
-                    stream.on("close", () => {
-                        try {
-                            peer.send(JSON.stringify({ type: "exit", code: 0 }));
-                        } catch {
-                            // Peer disconnected
-                        }
-                        channels.delete(peer.id);
-                    });
+                            stream.on("data", (chunk: Buffer) => {
+                                if (muted) {
+                                    // Look for the clear screen escape sequence
+                                    const str = chunk.toString();
+                                    if (str.includes("\x1b[2J")) {
+                                        muted = false;
+                                        // Don't forward the cd+clear output — send a clean reset instead
+                                    }
+                                    return;
+                                }
+                                try {
+                                    peer.send(JSON.stringify({ type: "output", data: chunk.toString() }));
+                                } catch {
+                                    // Peer disconnected
+                                }
+                            });
 
-                    // Set initial cwd if provided
-                    if (data.cwd) {
-                        stream.write(`cd ${JSON.stringify(data.cwd)} && clear\n`);
-                    }
-                },
-            );
+                            stream.on("close", () => {
+                                try {
+                                    peer.send(JSON.stringify({ type: "exit", code: 0 }));
+                                } catch {
+                                    // Peer disconnected
+                                }
+                                try { conn.end(); } catch {}
+                                terminalConns.delete(peer.id);
+                            });
+
+                            // Set initial cwd if provided
+                            if (data.cwd) {
+                                stream.write(`cd ${JSON.stringify(data.cwd)} && clear\n`);
+                            }
+                        },
+                    );
+                })
+                .catch((err) => {
+                    try {
+                        peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[SSH connection error: ${err.message}]\x1b[0m\r\n` }));
+                    } catch {}
+                });
         } else if (data.type === "input") {
-            const channel = channels.get(peer.id);
-            if (channel && typeof data.data === "string") {
-                channel.write(data.data);
+            const entry = terminalConns.get(peer.id);
+            if (entry && typeof data.data === "string") {
+                entry.stream.write(data.data);
             }
         } else if (data.type === "resize") {
-            const channel = channels.get(peer.id);
-            if (channel && typeof data.cols === "number" && typeof data.rows === "number") {
-                channel.setWindow(data.rows, data.cols, data.rows * 16, data.cols * 8);
+            const entry = terminalConns.get(peer.id);
+            if (entry && typeof data.cols === "number" && typeof data.rows === "number") {
+                entry.stream.setWindow(data.rows, data.cols, data.rows * 16, data.cols * 8);
             }
         }
     },
 
     close(peer) {
-        const channel = channels.get(peer.id);
-        if (channel) {
-            try { channel.close(); } catch {}
-            channels.delete(peer.id);
+        const entry = terminalConns.get(peer.id);
+        if (entry) {
+            try { entry.stream.close(); } catch {}
+            try { entry.conn.end(); } catch {}
+            terminalConns.delete(peer.id);
         }
     },
 
     error(peer) {
-        const channel = channels.get(peer.id);
-        if (channel) {
-            try { channel.close(); } catch {}
-            channels.delete(peer.id);
+        const entry = terminalConns.get(peer.id);
+        if (entry) {
+            try { entry.stream.close(); } catch {}
+            try { entry.conn.end(); } catch {}
+            terminalConns.delete(peer.id);
         }
     },
 });

@@ -10,75 +10,78 @@
                     <div class="section">
                         <p class="section-label">SSH Connection</p>
 
-                        <div class="ssh-row">
-                            <div class="field" style="flex: 2">
-                                <label class="field-label">Host</label>
-                                <input
-                                    v-model="sshHost"
-                                    class="field-input"
-                                    type="text"
-                                    placeholder="192.168.0.1"
-                                    spellcheck="false"
-                                />
+                        <form @submit.prevent="onSubmit">
+                            <div class="ssh-row">
+                                <div class="field" style="flex: 2">
+                                    <label class="field-label">Host</label>
+                                    <input
+                                        v-model="sshHost"
+                                        class="field-input"
+                                        type="text"
+                                        placeholder="192.168.0.1"
+                                        spellcheck="false"
+                                    />
+                                </div>
+                                <div class="field" style="flex: 0 0 70px">
+                                    <label class="field-label">Port</label>
+                                    <input
+                                        v-model.number="sshPort"
+                                        class="field-input"
+                                        type="number"
+                                        placeholder="22"
+                                    />
+                                </div>
                             </div>
-                            <div class="field" style="flex: 0 0 70px">
-                                <label class="field-label">Port</label>
-                                <input
-                                    v-model.number="sshPort"
-                                    class="field-input"
-                                    type="number"
-                                    placeholder="22"
-                                />
-                            </div>
-                        </div>
 
-                        <div class="ssh-row">
-                            <div class="field" style="flex: 1">
-                                <label class="field-label">Username</label>
-                                <input
-                                    v-model="sshUsername"
-                                    class="field-input"
-                                    type="text"
-                                    placeholder="toto"
-                                    spellcheck="false"
-                                />
+                            <div class="ssh-row">
+                                <div class="field" style="flex: 1">
+                                    <label class="field-label">Username</label>
+                                    <input
+                                        v-model="sshUsername"
+                                        class="field-input"
+                                        type="text"
+                                        placeholder="toto"
+                                        spellcheck="false"
+                                    />
+                                </div>
+                                <div class="field" style="flex: 1">
+                                    <label class="field-label">Password <span class="optional">(optional)</span></label>
+                                    <input
+                                        v-model="sshPassword"
+                                        class="field-input"
+                                        type="password"
+                                        placeholder="Uses SSH keys by default"
+                                    />
+                                </div>
                             </div>
-                            <div class="field" style="flex: 1">
-                                <label class="field-label">Password <span class="optional">(optional)</span></label>
-                                <input
-                                    v-model="sshPassword"
-                                    class="field-input"
-                                    type="password"
-                                    placeholder="Uses SSH keys by default"
-                                />
+
+                            <p class="field-hint">
+                                Enter an SSH address to browse files and run terminals on the remote machine.
+                                Authentication uses your SSH keys (~/.ssh/id_ed25519, id_rsa) or SSH agent automatically.
+                                Password is only needed if key auth fails.
+                            </p>
+
+                            <div class="ssh-actions">
+                                <button
+                                    v-if="!connected"
+                                    type="submit"
+                                    class="dialog-btn connect"
+                                    :disabled="!sshHost || !sshUsername || connecting"
+                                >
+                                    {{ connecting ? "Connecting..." : "Connect" }}
+                                </button>
+                                <button
+                                    v-else
+                                    type="button"
+                                    class="dialog-btn disconnect"
+                                    @click="disconnect"
+                                >
+                                    Disconnect
+                                </button>
+                                <span v-if="connected" class="status-badge connected">Connected to {{ connectedHost }}</span>
+                                <span v-if="error" class="status-badge error">{{ error }}</span>
                             </div>
-                        </div>
-
-                        <p class="field-hint">
-                            Enter an SSH address to browse files and run terminals on the remote machine.
-                            Authentication uses your SSH keys (~/.ssh/id_ed25519, id_rsa) or SSH agent automatically.
-                            Password is only needed if key auth fails.
-                        </p>
-
-                        <div class="ssh-actions">
-                            <button
-                                v-if="!connected"
-                                class="dialog-btn connect"
-                                :disabled="!sshHost || !sshUsername || connecting"
-                                @click="connect"
-                            >
-                                {{ connecting ? "Connecting..." : "Connect" }}
-                            </button>
-                            <button
-                                v-else
-                                class="dialog-btn disconnect"
-                                @click="disconnect"
-                            >
-                                Disconnect
-                            </button>
-                            <span v-if="connected" class="status-badge connected">Connected to {{ connectedHost }}</span>
-                            <span v-if="error" class="status-badge error">{{ error }}</span>
-                        </div>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -127,6 +130,12 @@ watch(() => props.show, async (visible) => {
         }
     }
 });
+
+function onSubmit() {
+    if (!connected.value && sshHost.value && sshUsername.value && !connecting.value) {
+        connect();
+    }
+}
 
 async function connect() {
     error.value = "";
@@ -248,7 +257,7 @@ async function disconnect() {
 }
 
 .section {
-    margin-bottom: 16px;
+    margin-bottom: 0;
 }
 
 .section-label {
@@ -347,8 +356,9 @@ async function disconnect() {
     cursor: pointer;
     color: rgba(255, 255, 255, 0.9);
     border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 0 0 transparent;
     transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
-        background 0.15s ease, box-shadow 0.15s ease;
+        background 0.15s ease, box-shadow 0.25s ease, border-color 0.15s ease;
 }
 .dialog-btn:disabled {
     opacity: 0.4;
@@ -361,8 +371,8 @@ async function disconnect() {
     border-color: rgba(110, 231, 183, 0.4);
 }
 .dialog-btn.connect:hover:not(:disabled) {
-    background: rgba(110, 231, 183, 0.35);
-    box-shadow: 0 0 14px rgba(110, 231, 183, 0.25);
+    background: rgba(110, 231, 183, 0.3);
+    box-shadow: 0 0 12px rgba(110, 231, 183, 0.2);
     transform: translateY(-2px);
 }
 
@@ -371,8 +381,8 @@ async function disconnect() {
     border-color: rgba(252, 165, 165, 0.4);
 }
 .dialog-btn.disconnect:hover {
-    background: rgba(252, 165, 165, 0.35);
-    box-shadow: 0 0 14px rgba(252, 165, 165, 0.25);
+    background: rgba(252, 165, 165, 0.3);
+    box-shadow: 0 0 12px rgba(252, 165, 165, 0.2);
     transform: translateY(-2px);
 }
 

@@ -193,3 +193,32 @@ export function getConnectedHost(): string {
 export function isSSHReconnecting(): boolean {
     return reconnecting;
 }
+
+/**
+ * Create a dedicated SSH connection for a terminal session.
+ * Each terminal gets its own connection to avoid the MaxSessions limit
+ * on the shared SFTP connection.
+ */
+export function createTerminalConnection(): Promise<Client> {
+    if (!lastConnectOpts) {
+        return Promise.reject(new Error("SSH not connected"));
+    }
+    const opts = lastConnectOpts;
+    return new Promise((resolve, reject) => {
+        const conn = new Client();
+        const config: ConnectConfig = {
+            host: opts.host,
+            port: opts.port || 22,
+            username: opts.username,
+            agent: process.env.SSH_AUTH_SOCK,
+            readyTimeout: 10000,
+        };
+        const privateKey = findPrivateKey();
+        if (privateKey) config.privateKey = privateKey;
+        if (opts.password) config.password = opts.password;
+
+        conn.on("ready", () => resolve(conn));
+        conn.on("error", (err) => reject(new Error(`SSH terminal connection failed: ${err.message}`)));
+        conn.connect(config);
+    });
+}
