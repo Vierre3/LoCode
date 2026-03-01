@@ -369,8 +369,8 @@ async function disconnect() {
     border-color: rgba(110, 231, 183, 0.4);
 }
 .dialog-btn.connect:hover:not(:disabled) {
-    background: rgba(110, 231, 183, 0.3);
-    box-shadow: 0 0 12px rgba(110, 231, 183, 0.2);
+    background: rgba(110, 231, 183, 0.35);
+    border-color: rgba(110, 231, 183, 0.7);
     transform: translateY(-2px);
 }
 
@@ -379,8 +379,8 @@ async function disconnect() {
     border-color: rgba(252, 165, 165, 0.4);
 }
 .dialog-btn.disconnect:hover {
-    background: rgba(252, 165, 165, 0.3);
-    box-shadow: 0 0 12px rgba(252, 165, 165, 0.2);
+    background: rgba(252, 165, 165, 0.35);
+    border-color: rgba(252, 165, 165, 0.7);
     transform: translateY(-2px);
 }
 
