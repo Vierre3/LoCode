@@ -202,16 +202,23 @@ function showError(message) {
     win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
 
-// Second launch: create a new window in the existing process (with optional dir arg)
+// Second launch: create a new window with the dir arg, or focus existing window
 app.on("second-instance", (_event, argv) => {
     const dirArg = parseDirArg(argv);
-    createWindow(dirArg || undefined);
-    // Focus the most recent window
-    const wins = BrowserWindow.getAllWindows();
-    if (wins.length > 0) {
-        const w = wins[wins.length - 1];
-        if (w.isMinimized()) w.restore();
-        w.focus();
+    if (dirArg) {
+        // Open a new window with the requested directory
+        const win = createWindow(dirArg);
+        win.once("ready-to-show", () => win.focus());
+    } else {
+        // No dir arg — just focus the most recent window
+        const wins = BrowserWindow.getAllWindows();
+        if (wins.length > 0) {
+            const w = wins[0];
+            if (w.isMinimized()) w.restore();
+            w.focus();
+        } else {
+            createWindow();
+        }
     }
 });
 
@@ -341,21 +348,23 @@ function installCLI() {
 
     if (platform === "darwin") {
         const target = "/usr/local/bin/locode";
+        // Use the Electron binary directly so second-instance receives argv
+        const appBinary = process.execPath;
         const script = [
             '#!/bin/sh',
+            '# LoCode CLI — opens a project in LoCode',
             'DIR=""',
             'if [ -n "$1" ] && [ -d "$1" ]; then',
             '    DIR="$(cd "$1" && pwd)"',
             'fi',
             'if [ -n "$DIR" ]; then',
-            '    open -a LoCode --args "$DIR"',
+            `    "${appBinary}" "$DIR" &`,
             'else',
-            '    open -a LoCode',
+            `    "${appBinary}" &`,
             'fi',
         ].join("\n") + "\n";
 
         try {
-            // Check if already installed with correct content
             if (fs.existsSync(target) && fs.readFileSync(target, "utf-8") === script) {
                 fs.writeFileSync(cliMarkerFile, "ok");
                 return;
@@ -363,14 +372,19 @@ function installCLI() {
         } catch {}
 
         try {
-            // Use osascript to get admin privileges (like VS Code's "Install 'code' command")
-            const escaped = script.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-            execSync(`osascript -e 'do shell script "echo \\"${escaped}\\" > ${target} && chmod 755 ${target}" with administrator privileges'`, { stdio: "ignore" });
-            log("[cli] installed /usr/local/bin/locode (via osascript)");
+            // Write script to a temp file first, then sudo-copy it (avoids shell escaping issues)
+            const tmpFile = path.join(app.getPath("temp"), "locode-cli-install.sh");
+            fs.writeFileSync(tmpFile, script, { mode: 0o755 });
+            execSync(
+                `osascript -e 'do shell script "cp ${JSON.stringify(tmpFile)} ${target} && chmod 755 ${target}" ` +
+                `with administrator privileges with prompt "LoCode wants to install the \\"locode\\" command in /usr/local/bin so you can open projects from the terminal (e.g. locode .)"'`,
+                { stdio: "ignore" }
+            );
+            try { fs.unlinkSync(tmpFile); } catch {}
+            log("[cli] installed /usr/local/bin/locode");
             fs.writeFileSync(cliMarkerFile, "ok");
         } catch (err) {
             log(`[cli] macOS install cancelled or failed: ${err.message}`);
-            // Mark as attempted so we don't prompt again
             fs.writeFileSync(cliMarkerFile, "skipped");
         }
     } else if (platform === "win32") {
