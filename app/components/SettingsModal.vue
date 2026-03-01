@@ -211,9 +211,7 @@ async function disconnect() {
 
 .dialog {
     position: relative;
-    background-color: rgba(30, 30, 30, 0.88);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    background-color: rgb(30, 30, 30);
     border: 1.5px solid rgba(255, 255, 255, 0.2);
     border-radius: 12px;
     padding: 24px;
@@ -223,7 +221,6 @@ async function disconnect() {
         0 4px 16px rgba(0, 0, 0, 0.35),
         0 20px 60px rgba(0, 0, 0, 0.55),
         inset 0 1px 0 rgba(255, 255, 255, 0.07);
-    transform: translateZ(0);
 }
 
 .dialog-close {
