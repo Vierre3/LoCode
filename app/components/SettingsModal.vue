@@ -80,29 +80,6 @@
                             <span v-if="error" class="status-badge error">{{ error }}</span>
                         </div>
                     </div>
-
-                    <!-- Advanced (legacy) -->
-                    <details class="advanced">
-                        <summary class="advanced-label">Advanced</summary>
-                        <div class="field">
-                            <label class="field-label">Legacy Backend URL</label>
-                            <input
-                                v-model="urlInput"
-                                class="field-input"
-                                type="url"
-                                placeholder="http://localhost:8080"
-                                spellcheck="false"
-                            />
-                            <p class="field-hint">
-                                Direct Deno backend URL (old remote mode). Leave empty when using SSH.
-                            </p>
-                        </div>
-                    </details>
-
-                    <div class="dialog-actions">
-                        <button class="dialog-btn save" @click="save">Save</button>
-                        <button class="dialog-btn cancel" @click="$emit('close')">Cancel</button>
-                    </div>
                 </div>
             </div>
         </Transition>
@@ -111,13 +88,12 @@
 
 <script setup lang="ts">
 const props = defineProps<{ show: boolean }>();
-const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
+const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void; (e: "connected"): void; (e: "disconnected"): void }>();
 
 const sshHost = ref("");
 const sshPort = ref(22);
 const sshUsername = ref("");
 const sshPassword = ref("");
-const urlInput = ref("");
 
 const connecting = ref(false);
 const connected = ref(false);
@@ -139,9 +115,6 @@ watch(() => props.show, async (visible) => {
                 sshUsername.value = parsed.username || "";
             }
         } catch {}
-
-        // Load legacy URL
-        urlInput.value = localStorage.getItem("locode:backendUrl") || "";
 
         // Check SSH connection status
         try {
@@ -189,6 +162,9 @@ async function connect() {
                 username: sshUsername.value,
             }));
         }
+        emit("saved");
+        emit("connected");
+        emit("close");
     } catch (err: any) {
         error.value = err.message || "Connection failed";
     } finally {
@@ -205,19 +181,8 @@ async function disconnect() {
     if (import.meta.client) {
         localStorage.removeItem("locode:sshTarget");
     }
-}
-
-function save() {
-    if (import.meta.client) {
-        // Save legacy URL
-        const trimmed = urlInput.value.trim().replace(/\/$/, "");
-        if (trimmed) {
-            localStorage.setItem("locode:backendUrl", trimmed);
-        } else {
-            localStorage.removeItem("locode:backendUrl");
-        }
-    }
     emit("saved");
+    emit("disconnected");
     emit("close");
 }
 </script>
@@ -374,24 +339,6 @@ function save() {
     border: 1px solid rgba(252, 165, 165, 0.3);
 }
 
-.advanced {
-    margin-bottom: 16px;
-}
-.advanced-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.35);
-    cursor: pointer;
-    padding: 4px 0;
-    margin-bottom: 8px;
-}
-.advanced-label:hover { color: rgba(255, 255, 255, 0.55); }
-
-.dialog-actions {
-    display: flex;
-    gap: 8px;
-}
-
 .dialog-btn {
     padding: 7px 14px;
     font-size: 0.82rem;
@@ -426,26 +373,6 @@ function save() {
 .dialog-btn.disconnect:hover {
     background: rgba(252, 165, 165, 0.35);
     box-shadow: 0 0 14px rgba(252, 165, 165, 0.25);
-    transform: translateY(-2px);
-}
-
-.dialog-btn.save {
-    flex: 1;
-    background: rgba(100, 180, 255, 0.25);
-    border-color: rgba(100, 180, 255, 0.4);
-}
-.dialog-btn.save:hover {
-    background: rgba(100, 180, 255, 0.4);
-    box-shadow: 0 0 14px rgba(100, 180, 255, 0.3);
-    transform: translateY(-2px);
-}
-
-.dialog-btn.cancel {
-    flex: 1;
-    background: rgba(255, 255, 255, 0.1);
-}
-.dialog-btn.cancel:hover {
-    background: rgba(255, 255, 255, 0.2);
     transform: translateY(-2px);
 }
 

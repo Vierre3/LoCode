@@ -24,12 +24,16 @@ const props = defineProps<{
     focused: boolean;
 }>();
 
+const { getWsUrl, getMode } = useApi();
+
 const termContainer = ref<HTMLDivElement | null>(null);
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let ws: WebSocket | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let ipcCleanups: (() => void)[] = [];
+// Use local node-pty only in Electron + local mode; SSH mode always uses WebSocket
+const useLocalPty = !!electronTerminal && getMode() === "local";
 
 // Unique ID for this terminal instance (used for IPC routing)
 const termId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -87,8 +91,8 @@ onMounted(async () => {
 
     doFit();
 
-    if (electronTerminal) {
-        // ── Electron mode: IPC to main process (node-pty runs there) ──
+    if (useLocalPty) {
+        // ── Electron mode (local): IPC to main process (node-pty runs there) ──
         ipcCleanups.push(
             electronTerminal.onData(({ id, data }) => {
                 if (id === termId && term) term.write(data);
@@ -113,8 +117,7 @@ onMounted(async () => {
 
         term.onData((data) => electronTerminal!.write(termId, data));
     } else {
-        // ── Web mode: WebSocket to Nuxt server / SSH backend ──
-        const { getWsUrl } = useApi();
+        // ── Web mode or SSH: WebSocket to Nuxt server / SSH backend ──
         ws = new WebSocket(getWsUrl());
 
         ws.onopen = () => {
@@ -166,8 +169,8 @@ onMounted(async () => {
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
         doFit();
-        if (electronTerminal) {
-            electronTerminal.resize(termId, term.cols, term.rows);
+        if (useLocalPty) {
+            electronTerminal!.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
         }
@@ -197,8 +200,8 @@ onBeforeUnmount(() => {
     resizeObserver?.disconnect();
     ipcCleanups.forEach((fn) => fn());
     ipcCleanups = [];
-    if (electronTerminal) {
-        electronTerminal.kill(termId);
+    if (useLocalPty) {
+        electronTerminal!.kill(termId);
     }
     if (ws) {
         ws.close();

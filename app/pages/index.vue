@@ -45,7 +45,7 @@
                         @click="terminalOpen ? closeTerminal() : openTerminal()" />
                 </div>
             </div>
-            <div class="flex-1 min-h-0 flex flex-col gap-2">
+            <div class="flex-1 min-h-0 flex flex-col">
                 <div class="flex-1 min-h-0">
                     <EditorArea ref="editorAreaRef" :panes="panes"
                         :activePaneId="activePaneId" :isMobile="isMobile"
@@ -71,7 +71,9 @@
 
         <SettingsModal :show="showSettings"
             @close="showSettings = false"
-            @saved="isRemote = getMode() !== 'local'" />
+            @saved="isRemote = getMode() !== 'local'"
+            @connected="onSSHConnected"
+            @disconnected="onSSHDisconnected" />
     </div>
 </template>
 
@@ -424,6 +426,31 @@ function closeTerminal() {
     terminalOpen.value = false;
     saveWorkspaceConfig();
     nextTick(() => editorAreaRef.value?.focusPane(activePaneId.value));
+}
+
+// --- SSH connect/disconnect ---
+function onSSHConnected() {
+    // New remote device — clear current workspace and show folder selector
+    saveWorkspaceConfig();
+    rootPath.value = "";
+    localStorage.removeItem("locode:rootPath");
+    electronSession?.setRoot("");
+    panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+    activePaneId.value = "main";
+    lastMtime.clear();
+    if (terminalOpen.value) closeTerminal();
+}
+
+function onSSHDisconnected() {
+    // Back to local — clear workspace and show folder selector
+    saveWorkspaceConfig();
+    rootPath.value = "";
+    localStorage.removeItem("locode:rootPath");
+    electronSession?.setRoot("");
+    panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+    activePaneId.value = "main";
+    lastMtime.clear();
+    if (terminalOpen.value) closeTerminal();
 }
 
 const editorAreaRef = ref<{ splitRatio: number; focusPane: (id: string) => void } | null>(null);
