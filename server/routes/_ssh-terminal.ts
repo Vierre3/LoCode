@@ -2,6 +2,15 @@ import { defineWebSocketHandler } from "h3";
 
 const channels = new Map<string, any>();
 
+// Clean up ALL stale channels when the SSH connection drops/reconnects
+// This frees MaxSessions slots on the SSH server
+export function cleanupAllChannels() {
+    for (const [id, stream] of channels) {
+        try { stream.close(); } catch {}
+    }
+    channels.clear();
+}
+
 export default defineWebSocketHandler({
     open(_peer) {
         // Wait for "create" message before opening shell
@@ -84,7 +93,7 @@ export default defineWebSocketHandler({
     close(peer) {
         const channel = channels.get(peer.id);
         if (channel) {
-            channel.close();
+            try { channel.close(); } catch {}
             channels.delete(peer.id);
         }
     },
@@ -92,7 +101,7 @@ export default defineWebSocketHandler({
     error(peer) {
         const channel = channels.get(peer.id);
         if (channel) {
-            channel.close();
+            try { channel.close(); } catch {}
             channels.delete(peer.id);
         }
     },
