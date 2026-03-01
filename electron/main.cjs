@@ -375,11 +375,11 @@ function installCLI() {
             // Write script to a temp file, then sudo-copy it (avoids shell escaping)
             const tmpFile = path.join(app.getPath("temp"), "locode-cli-install.sh");
             fs.writeFileSync(tmpFile, script, { mode: 0o755 });
-            execSync(
-                `osascript -e 'do shell script "mkdir -p /usr/local/bin && cp ${JSON.stringify(tmpFile)} ${target} && chmod 755 ${target}" ` +
-                `with administrator privileges with prompt "LoCode wants to install the \\"locode\\" command in /usr/local/bin so you can open projects from the terminal.\\n\\nThis creates a small shell script at:\\n${target}"'`,
-                { stdio: "ignore" }
-            );
+
+            // Two-step osascript: explain what will happen, then ask for admin privileges
+            const explanation = 'LoCode would like to install the "locode" command so you can open projects from the terminal (e.g. locode .)\\n\\nThis creates a small shell script at:\\n' + target;
+            const osa = `osascript -e 'display dialog "${explanation}" buttons {"Cancel", "Install"} default button "Install" with title "LoCode CLI" with icon caution' -e 'do shell script "mkdir -p /usr/local/bin && cp \\"${tmpFile}\\" ${target} && chmod 755 ${target}" with administrator privileges'`;
+            execSync(osa, { stdio: "ignore" });
             try { fs.unlinkSync(tmpFile); } catch {}
             log("[cli] installed /usr/local/bin/locode");
         } catch (err) {
