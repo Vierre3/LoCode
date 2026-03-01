@@ -326,48 +326,74 @@ ipcMain.on("term:kill", (_event, { id }) => {
 });
 
 // ── CLI command installer ────────────────────────────────────────────
-// Automatically installs the `locode` shell command so users can run `locode .`
+// Installs the `locode` shell command so users can run `locode .` from terminal.
+// macOS: uses osascript for admin privileges (prompts password once)
+// Windows: creates locode.cmd and adds to user PATH via registry
+const cliMarkerFile = path.join(app.getPath("userData"), ".cli-installed");
+
 function installCLI() {
-    if (!isPacked) return; // only for packaged builds
+    if (!isPacked) return;
+    // Only attempt once — don't nag on every launch
+    if (fs.existsSync(cliMarkerFile)) return;
 
     const platform = process.platform;
+    const { execSync } = require("child_process");
 
     if (platform === "darwin") {
-        // macOS: create /usr/local/bin/locode that calls `open -a LoCode --args "$@"`
         const target = "/usr/local/bin/locode";
-        const script = `#!/bin/sh\nDIR=""\nif [ -n "$1" ] && [ -d "$1" ]; then\n    DIR="$(cd "$1" && pwd)"\nfi\nif [ -n "$DIR" ]; then\n    open -a LoCode --args "$DIR"\nelse\n    open -a LoCode\nfi\n`;
+        const script = [
+            '#!/bin/sh',
+            'DIR=""',
+            'if [ -n "$1" ] && [ -d "$1" ]; then',
+            '    DIR="$(cd "$1" && pwd)"',
+            'fi',
+            'if [ -n "$DIR" ]; then',
+            '    open -a LoCode --args "$DIR"',
+            'else',
+            '    open -a LoCode',
+            'fi',
+        ].join("\n") + "\n";
+
         try {
-            if (!fs.existsSync(target) || fs.readFileSync(target, "utf-8") !== script) {
-                fs.writeFileSync(target, script, { mode: 0o755 });
-                log("[cli] installed /usr/local/bin/locode");
+            // Check if already installed with correct content
+            if (fs.existsSync(target) && fs.readFileSync(target, "utf-8") === script) {
+                fs.writeFileSync(cliMarkerFile, "ok");
+                return;
             }
-        } catch {
-            // /usr/local/bin may not be writable — not critical
-            log("[cli] could not install to /usr/local/bin (permission denied)");
+        } catch {}
+
+        try {
+            // Use osascript to get admin privileges (like VS Code's "Install 'code' command")
+            const escaped = script.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+            execSync(`osascript -e 'do shell script "echo \\"${escaped}\\" > ${target} && chmod 755 ${target}" with administrator privileges'`, { stdio: "ignore" });
+            log("[cli] installed /usr/local/bin/locode (via osascript)");
+            fs.writeFileSync(cliMarkerFile, "ok");
+        } catch (err) {
+            log(`[cli] macOS install cancelled or failed: ${err.message}`);
+            // Mark as attempted so we don't prompt again
+            fs.writeFileSync(cliMarkerFile, "skipped");
         }
     } else if (platform === "win32") {
-        // Windows: create locode.cmd in the app directory and add to user PATH
         const appDir = path.dirname(process.execPath);
         const cmdFile = path.join(appDir, "locode.cmd");
         const exePath = process.execPath;
         const script = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\n`;
         try {
-            if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== script) {
-                fs.writeFileSync(cmdFile, script);
-                log(`[cli] installed ${cmdFile}`);
-            }
-            // Add to user PATH via registry (non-destructive — appends if not present)
-            const { execSync } = require("child_process");
+            fs.writeFileSync(cmdFile, script);
             const currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
             if (!currentPath.includes(appDir)) {
                 execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${currentPath};${appDir}" /f`, { stdio: "ignore" });
                 log(`[cli] added ${appDir} to user PATH`);
             }
+            log(`[cli] installed ${cmdFile}`);
+            fs.writeFileSync(cliMarkerFile, "ok");
         } catch (err) {
             log(`[cli] Windows CLI install failed: ${err.message}`);
+            fs.writeFileSync(cliMarkerFile, "skipped");
         }
+    } else {
+        fs.writeFileSync(cliMarkerFile, "linux-skip");
     }
-    // Linux AppImage: no auto-install (AppImage is portable, user can alias it)
 }
 
 app.whenReady().then(async () => {
