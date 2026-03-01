@@ -187,10 +187,11 @@ onMounted(async () => {
 
     // Resize observer — skip fit when hidden (0 dimensions)
     resizeObserver = new ResizeObserver((entries) => {
-        if (!fitAddon || !term) return;
+        if (!fitAddon || !term || disposed) return;
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
         doFit();
+        if (!term) return; // doFit may have raced with unmount
         if (useLocalPty) {
             electronTerminal!.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
