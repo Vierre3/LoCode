@@ -196,8 +196,8 @@
 
 .btn:hover:not(:disabled) {
     transform: translateZ(0) translateY(-2px);
-    border-color: rgba(255, 255, 255, 0.37);
-    box-shadow: 0 0 14px rgba(180, 210, 255, 0.3);
+    border-color: rgba(180, 210, 255, 0.45);
+    box-shadow: 0 0 18px rgba(140, 190, 255, 0.35), 0 0 6px rgba(180, 210, 255, 0.2);
 }
 
 .btn:disabled {

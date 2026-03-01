@@ -14,9 +14,9 @@ jobs:
     strategy:
       matrix:
         include:
-          # - os: windows
-          #   platform: win
-          #   artifact: .exe
+          - os: windows
+            platform: win
+            artifact: .exe
           - os: macos
             platform: mac
             artifact: .dmg
