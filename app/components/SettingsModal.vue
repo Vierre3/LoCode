@@ -223,7 +223,6 @@ async function disconnect() {
         0 4px 16px rgba(0, 0, 0, 0.35),
         0 20px 60px rgba(0, 0, 0, 0.55),
         inset 0 1px 0 rgba(255, 255, 255, 0.07);
-    will-change: transform;
 }
 
 .dialog-close {
@@ -316,7 +315,10 @@ async function disconnect() {
     -webkit-appearance: none;
     margin: 0;
 }
-.field-input[type="number"] { -moz-appearance: textfield; }
+.field-input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
 
 .field-hint {
     font-size: 0.72rem;
@@ -388,8 +390,6 @@ async function disconnect() {
 }
 
 /* Transition */
-.modal-enter-active { animation: backdrop-fade-in 0.25s ease forwards; }
-@keyframes backdrop-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .modal-enter-active .dialog { animation: modal-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
 @keyframes modal-in {
     0%   { opacity: 0; transform: scale(0.88) translateY(12px); }
