@@ -32,6 +32,8 @@ let fitAddon: FitAddon | null = null;
 let ws: WebSocket | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let ipcCleanups: (() => void)[] = [];
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let disposed = false;
 // Use local node-pty only in Electron + local mode; SSH mode always uses WebSocket
 const useLocalPty = !!electronTerminal && getMode() === "local";
 
@@ -54,6 +56,54 @@ function doFit() {
             term.resize(term.cols + extra, term.rows);
         }
     }
+}
+
+function connectWs() {
+    if (disposed || !term) return;
+    ws = new WebSocket(getWsUrl());
+
+    ws.onopen = () => {
+        ws!.send(JSON.stringify({
+            type: "create",
+            cwd: props.cwd || undefined,
+            cols: term!.cols,
+            rows: term!.rows,
+        }));
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "output" && term) {
+                term.write(msg.data);
+            } else if (msg.type === "exit" && term) {
+                term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
+            }
+        } catch {
+            // Ignore malformed messages
+        }
+    };
+
+    ws.onclose = () => {
+        if (disposed) return;
+        if (term) {
+            term.write("\r\n\x1b[90m[Connection lost — reconnecting...]\x1b[0m\r\n");
+        }
+        ws = null;
+        scheduleWsReconnect();
+    };
+
+    ws.onerror = () => {
+        // onclose will fire after onerror, reconnect handled there
+    };
+}
+
+function scheduleWsReconnect() {
+    if (disposed || wsReconnectTimer) return;
+    wsReconnectTimer = setTimeout(() => {
+        wsReconnectTimer = null;
+        if (!disposed) connectWs();
+    }, 5000);
 }
 
 onMounted(async () => {
@@ -118,35 +168,7 @@ onMounted(async () => {
         term.onData((data) => electronTerminal!.write(termId, data));
     } else {
         // ── Web mode or SSH: WebSocket to Nuxt server / SSH backend ──
-        ws = new WebSocket(getWsUrl());
-
-        ws.onopen = () => {
-            ws!.send(JSON.stringify({
-                type: "create",
-                cwd: props.cwd || undefined,
-                cols: term!.cols,
-                rows: term!.rows,
-            }));
-        };
-
-        ws.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                if (msg.type === "output" && term) {
-                    term.write(msg.data);
-                } else if (msg.type === "exit" && term) {
-                    term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
-                }
-            } catch {
-                // Ignore malformed messages
-            }
-        };
-
-        ws.onclose = () => {
-            if (term) {
-                term.write("\r\n\x1b[90m[Connection closed]\x1b[0m\r\n");
-            }
-        };
+        connectWs();
 
         term.onData((data) => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -197,6 +219,8 @@ watch(() => props.active, (active) => {
 });
 
 onBeforeUnmount(() => {
+    disposed = true;
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
     resizeObserver?.disconnect();
     ipcCleanups.forEach((fn) => fn());
     ipcCleanups = [];

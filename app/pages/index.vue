@@ -1,5 +1,12 @@
 <template>
     <div class="flex h-screen gap-2 p-2 relative">
+        <!-- Progress bar -->
+        <Transition name="progress-fade">
+            <div v-if="loadingPaneId" class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+        </Transition>
+
         <!-- Mobile hamburger toggle -->
         <button @click="sidebarOpen = !sidebarOpen" class="hamburger md:hidden">
             {{ sidebarOpen ? '✕' : '☰' }}
@@ -333,6 +340,44 @@
     transition: border-color 0.3s ease, box-shadow 0.6s ease !important;
 }
 
+/* --- Progress bar --- */
+.progress-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    z-index: 200;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(100, 180, 255, 0.8), rgba(100, 220, 180, 0.8));
+    border-radius: 0 2px 2px 0;
+    animation: progress-crawl 2.5s cubic-bezier(0.1, 0.05, 0.6, 1) forwards;
+}
+
+@keyframes progress-crawl {
+    0%   { width: 0%; }
+    30%  { width: 60%; }
+    70%  { width: 78%; }
+    100% { width: 85%; }
+}
+
+.progress-fade-leave-active .progress-fill {
+    width: 100% !important;
+    transition: width 0.1s ease;
+}
+
+.progress-fade-leave-active {
+    transition: opacity 0.3s ease 0.1s;
+}
+
+.progress-fade-leave-to {
+    opacity: 0;
+}
+
 </style>
 
 <script setup lang="ts">
@@ -358,7 +403,9 @@ const cfgTerminalHeight = ref(261);
 
 const rootPath = ref(
     import.meta.client
-        ? (electronSession?.getInitialRoot() || localStorage.getItem("locode:rootPath") || "")
+        ? (electronSession
+            ? electronSession.getInitialRoot()   // Electron: session system is authoritative
+            : localStorage.getItem("locode:rootPath") || "")  // Web: use localStorage
         : ""
 );
 const sidebarOpen = ref(false);
