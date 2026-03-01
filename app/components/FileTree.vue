@@ -1,6 +1,6 @@
 <template>
     <ul :class="{ 'browse-mode': !!onSelect }">
-        <li v-for="node in nodes" :key="node.path">
+        <li v-for="node in sortedNodes" :key="node.path">
             <div class="node-row">
                 <div class="node cursor-pointer p-0.5 rounded select-none"
                     :class="{ active: openFiles.includes(node.path) }"
@@ -34,6 +34,21 @@ const props = defineProps<{
     onClick: (node: any) => void,
     onSelect?: (node: any) => void
 }>();
+
+const sortedNodes = computed(() =>
+    [...props.nodes].sort((a, b) => {
+        // Folders before files
+        if (a.type === "dir" && b.type !== "dir") return -1;
+        if (a.type !== "dir" && b.type === "dir") return 1;
+        // Dotfiles/dotfolders first within same type
+        const aDot = a.name.startsWith(".");
+        const bDot = b.name.startsWith(".");
+        if (aDot && !bDot) return -1;
+        if (!aDot && bDot) return 1;
+        // Alphabetical (case-insensitive)
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    })
+);
 
 const hoveredRawPath = inject<Ref<string>>("hoveredRawPath")!;
 const showTooltip = inject<(path: string, rect: DOMRect) => void>("showTooltip");
