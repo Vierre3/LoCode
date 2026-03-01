@@ -162,8 +162,8 @@ function createWindow(rootPath) {
     win.webContents.on("did-finish-load", () => {
         log("[window] did-finish-load");
     });
-    win.webContents.on("console-message", (e, level, msg, line, sourceId) => {
-        log(`[window:console] [${level}] ${msg}`);
+    win.webContents.on("console-message", (e) => {
+        log(`[window:console] [${e.level}] ${e.message}`);
     });
 
     const url = rootPath
