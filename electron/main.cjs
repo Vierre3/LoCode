@@ -325,7 +325,53 @@ ipcMain.on("term:kill", (_event, { id }) => {
     terminalOwner.delete(id);
 });
 
+// ── CLI command installer ────────────────────────────────────────────
+// Automatically installs the `locode` shell command so users can run `locode .`
+function installCLI() {
+    if (!isPacked) return; // only for packaged builds
+
+    const platform = process.platform;
+
+    if (platform === "darwin") {
+        // macOS: create /usr/local/bin/locode that calls `open -a LoCode --args "$@"`
+        const target = "/usr/local/bin/locode";
+        const script = `#!/bin/sh\nDIR=""\nif [ -n "$1" ] && [ -d "$1" ]; then\n    DIR="$(cd "$1" && pwd)"\nfi\nif [ -n "$DIR" ]; then\n    open -a LoCode --args "$DIR"\nelse\n    open -a LoCode\nfi\n`;
+        try {
+            if (!fs.existsSync(target) || fs.readFileSync(target, "utf-8") !== script) {
+                fs.writeFileSync(target, script, { mode: 0o755 });
+                log("[cli] installed /usr/local/bin/locode");
+            }
+        } catch {
+            // /usr/local/bin may not be writable — not critical
+            log("[cli] could not install to /usr/local/bin (permission denied)");
+        }
+    } else if (platform === "win32") {
+        // Windows: create locode.cmd in the app directory and add to user PATH
+        const appDir = path.dirname(process.execPath);
+        const cmdFile = path.join(appDir, "locode.cmd");
+        const exePath = process.execPath;
+        const script = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\n`;
+        try {
+            if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== script) {
+                fs.writeFileSync(cmdFile, script);
+                log(`[cli] installed ${cmdFile}`);
+            }
+            // Add to user PATH via registry (non-destructive — appends if not present)
+            const { execSync } = require("child_process");
+            const currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
+            if (!currentPath.includes(appDir)) {
+                execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${currentPath};${appDir}" /f`, { stdio: "ignore" });
+                log(`[cli] added ${appDir} to user PATH`);
+            }
+        } catch (err) {
+            log(`[cli] Windows CLI install failed: ${err.message}`);
+        }
+    }
+    // Linux AppImage: no auto-install (AppImage is portable, user can alias it)
+}
+
 app.whenReady().then(async () => {
+    installCLI();
     // ── Application menu (enables "New Window" in dock right-click on macOS) ──
     const isMac = process.platform === "darwin";
     const template = [
