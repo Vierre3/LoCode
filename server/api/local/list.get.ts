@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
                 type: e.isDirectory() ? "dir" as const : "file" as const,
             }));
         return result;
-    } catch {
-        throw createError({ statusCode: 500, statusMessage: "Error listing directory" });
+    } catch (err: any) {
+        throw createError({ statusCode: 500, statusMessage: `Error listing directory: ${err?.code || err?.message || "unknown"}` });
     }
 });

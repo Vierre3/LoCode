@@ -895,7 +895,7 @@ async function loadFileIntoPane(paneId: string, path: string) {
     try {
         const res = await apiFetch("/read?path=" + encodeURIComponent(path));
         if (!res.ok) {
-            pane.code = `Error ${res.status}: unable to read file`;
+            pane.code = `Error: ${res.statusText || "unable to read file"}`;
             pane.savedCode = pane.code;
             pane.language = "plaintext";
             return;

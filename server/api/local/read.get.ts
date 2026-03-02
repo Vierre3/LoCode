@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
         const content = await readFile(path, "utf-8");
         setResponseHeader(event, "Content-Type", "text/plain; charset=utf-8");
         return content;
-    } catch {
-        throw createError({ statusCode: 500, statusMessage: "Error reading file" });
+    } catch (err: any) {
+        throw createError({ statusCode: 500, statusMessage: `Error reading file: ${err?.code || err?.message || "unknown"}` });
     }
 });
