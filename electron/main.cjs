@@ -470,13 +470,20 @@ async function installCLI() {
 
             if (needInstall.length > 0) {
                 // Write script to /tmp in each distro, then build a .bat for sudo
-                const batLines = ['@echo off', 'title LoCode WSL Install', 'echo.'];
+                const batLines = [
+                    '@echo off',
+                    'title LoCode WSL Install',
+                    'echo.',
+                    'echo  LoCode wants to install the "locode" command in your WSL distros',
+                    'echo  so you can open projects from WSL (e.g. locode .)',
+                    'echo.',
+                ];
                 for (const d of needInstall) {
                     spawnSync('wsl', ['-d', d, '-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], { input: wslScript, timeout: 5000 });
                     batLines.push(`echo  Installing in ${d}...`);
                     batLines.push(`wsl -d ${d} -- sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"`);
                 }
-                batLines.push('echo.', 'echo  Done! You can now use "locode ." in WSL.', 'pause');
+                batLines.push('echo.', 'echo  Done!', 'timeout /t 2 >nul');
                 const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
                 fs.writeFileSync(batFile, batLines.join('\r\n') + '\r\n');
                 await require("electron").shell.openPath(batFile);

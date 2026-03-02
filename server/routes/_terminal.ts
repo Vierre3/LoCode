@@ -27,8 +27,24 @@ export default defineWebSocketHandler({
             // Fallback to home or / if cwd doesn't exist
             if (!existsSync(cwd)) cwd = existsSync(home) ? home : "/";
 
-            const shell = process.env.SHELL
-                || (process.platform === "darwin" ? "/bin/zsh" : process.platform === "win32" ? "powershell.exe" : "/bin/bash");
+            // Detect WSL paths (\\wsl$\... or \\wsl.localhost\...)
+            const isWslPath = process.platform === "win32" && /^\\\\wsl[.$\\]/i.test(cwd);
+
+            let shell: string;
+            let shellArgs: string[] = [];
+            if (isWslPath) {
+                // Extract distro name and convert to Linux path
+                const m = cwd.match(/^\\\\wsl(?:\.localhost|\$)\\([^\\]+)(.*)$/i);
+                const distro = m?.[1] || "";
+                const linuxPath = m?.[2]?.replace(/\\/g, "/") || "/";
+                shell = "wsl.exe";
+                shellArgs = ["-d", distro, "--cd", linuxPath];
+            } else if (process.platform === "win32") {
+                shell = "powershell.exe";
+            } else {
+                shell = process.env.SHELL
+                    || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+            }
 
             // Ensure PATH includes standard dirs (macOS .app bundles have minimal PATH)
             const stdPath = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
@@ -36,11 +52,11 @@ export default defineWebSocketHandler({
 
             let term: pty.IPty;
             try {
-                term = pty.spawn(shell, [], {
+                term = pty.spawn(shell, shellArgs, {
                     name: "xterm-256color",
                     cols: data.cols || 80,
                     rows: data.rows || 24,
-                    cwd,
+                    cwd: isWslPath ? undefined : cwd,
                     env: {
                         ...process.env,
                         PATH: envPath,
