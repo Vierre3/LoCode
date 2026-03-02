@@ -53,14 +53,7 @@
     "icon": "electron/icon-1024.png",
     "files": [
       "electron/**/*",
-      ".output/**/*",
-      "!**/*.map",
-      "!**/test/**",
-      "!**/tests/**",
-      "!**/*.md",
-      "!**/.github/**",
-      "!**/CHANGELOG*",
-      "!**/LICENSE*"
+      ".output/**/*"
     ],
     "mac": {
       "target": [

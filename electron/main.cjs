@@ -84,7 +84,6 @@ const logStream = fs.createWriteStream(logPath, { flags: "w" }); // overwrite ea
 function log(msg) {
     const line = `[${new Date().toISOString()}] ${msg}`;
     logStream.write(line + "\n");
-    console.log(line);
 }
 
 log(`LoCode starting — packed=${isPacked}`);
