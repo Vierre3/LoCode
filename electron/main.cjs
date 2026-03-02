@@ -467,10 +467,15 @@ function installCLI() {
             if (currentWsl === wslScript) {
                 log("[cli] WSL locode already up to date");
             } else {
-                // Write directly via WSL printf + sudo tee in a visible terminal (avoids CRLF issues)
-                const escaped = wslScript.replace(/'/g, "'\\''");
-                execSync(`start /wait wsl -e bash -c "printf '%s' '${escaped}' | sudo tee /usr/local/bin/locode > /dev/null && sudo chmod 755 /usr/local/bin/locode"`, {
-                    shell: true,
+                // Write to WSL tmp via stdin (avoids CRLF from Windows fs)
+                const { spawnSync } = require("child_process");
+                spawnSync('wsl', ['-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], {
+                    input: wslScript,
+                    timeout: 5000,
+                });
+                // sudo copy + chmod in a visible terminal so user can type password
+                spawnSync('cmd.exe', ['/c', 'start', '/wait', 'wsl', '-e', 'sudo', 'sh', '-c',
+                    'mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode'], {
                     timeout: 30000,
                 });
                 log("[cli] installed WSL /usr/local/bin/locode");
