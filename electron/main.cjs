@@ -458,15 +458,28 @@ function installCLI() {
                 `    "${wslExePath}" &`,
                 'fi',
             ].join("\n") + "\n";
-            execSync(`wsl -e sudo tee /usr/local/bin/locode`, {
-                input: wslScript,
-                stdio: ["pipe", "ignore", "ignore"],
-                timeout: 5000,
-            });
-            execSync(`wsl -e sudo chmod 755 /usr/local/bin/locode`, { stdio: "ignore", timeout: 5000 });
-            log("[cli] installed WSL /usr/local/bin/locode");
+
+            // Check if already up to date
+            let currentWsl = "";
+            try {
+                currentWsl = execSync('wsl -e cat /usr/local/bin/locode', { encoding: "utf-8", timeout: 5000 });
+            } catch {}
+            if (currentWsl === wslScript) {
+                log("[cli] WSL locode already up to date");
+            } else {
+                // Write script to Windows temp, convert path, then open a visible terminal for sudo
+                const tmpFile = path.join(app.getPath("temp"), "locode-wsl-cli");
+                fs.writeFileSync(tmpFile, wslScript);
+                const wslTmpPath = execSync(`wsl -e wslpath -u "${tmpFile}"`, { encoding: "utf-8", timeout: 5000 }).trim();
+                execSync(`start /wait wsl -e sudo sh -c "cp '${wslTmpPath}' /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"`, {
+                    shell: true,
+                    timeout: 30000,
+                });
+                try { fs.unlinkSync(tmpFile); } catch {}
+                log("[cli] installed WSL /usr/local/bin/locode");
+            }
         } catch {
-            // WSL not installed, sudo not available, or timeout — skip silently
+            // WSL not installed or user cancelled — skip silently
         }
     }
     // Linux: no auto-install (AppImage is portable)
