@@ -24,16 +24,15 @@ export default defineWebSocketHandler({
             const home = process.env.HOME || (process.platform === "darwin" ? `/Users/${process.env.USER || ""}` : "/home");
             let cwd = typeof data.cwd === "string" && data.cwd ? data.cwd : home;
 
-            // Fallback to home or / if cwd doesn't exist
-            if (!existsSync(cwd)) cwd = existsSync(home) ? home : "/";
-
-            // Detect WSL paths (\\wsl$\... or \\wsl.localhost\...)
+            // Detect WSL paths BEFORE existsSync (Node on Windows can't stat \\wsl.localhost\...)
             const isWslPath = process.platform === "win32" && /^\\\\wsl[.$\\]/i.test(cwd);
+
+            // Fallback to home or / if cwd doesn't exist (skip for WSL paths)
+            if (!isWslPath && !existsSync(cwd)) cwd = existsSync(home) ? home : "/";
 
             let shell: string;
             let shellArgs: string[] = [];
             if (isWslPath) {
-                // Extract distro name and convert to Linux path
                 const m = cwd.match(/^\\\\wsl(?:\.localhost|\$)\\([^\\]+)(.*)$/i);
                 const distro = m?.[1] || "";
                 const linuxPath = m?.[2]?.replace(/\\/g, "/") || "/";
