@@ -866,7 +866,7 @@ function startReloadPolling() {
             if (prev && mtime > prev && pane.code === pane.savedCode) {
                 // File changed on disk and no unsaved edits — reload
                 try {
-                    const res = await apiFetch("/read?path=" + pane.filePath);
+                    const res = await apiFetch("/read?path=" + encodeURIComponent(pane.filePath));
                     if (res.ok) {
                         const text = await res.text();
                         userEdited.delete(pane.id);
@@ -893,11 +893,10 @@ async function loadFileIntoPane(paneId: string, path: string) {
     loadingPaneId.value = paneId;
 
     try {
-        const res = await apiFetch("/read?path=" + path);
+        const res = await apiFetch("/read?path=" + encodeURIComponent(path));
         if (!res.ok) {
-            const text = await res.text();
-            pane.code = text;
-            pane.savedCode = text;
+            pane.code = `Error ${res.status}: unable to read file`;
+            pane.savedCode = pane.code;
             pane.language = "plaintext";
             return;
         }

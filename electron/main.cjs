@@ -203,7 +203,9 @@ function showError(message) {
 
 // Second launch: create a new window with the dir arg, or focus existing window
 app.on("second-instance", (_event, argv) => {
+    log(`[second-instance] argv=${JSON.stringify(argv)}`);
     const dirArg = parseDirArg(argv);
+    log(`[second-instance] dirArg=${dirArg}`);
     if (dirArg) {
         // Open a new window with the requested directory
         const win = createWindow(dirArg);
@@ -427,7 +429,7 @@ async function installCLI() {
 
         // ── Write locode.cmd next to the exe ──
         const cmdFile = path.join(appDir, "locode.cmd");
-        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" /d "%SYSTEMROOT%" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" /d "%SYSTEMROOT%" "${exePath}" %*\r\n)\r\nexit /b 0\r\n`;
+        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" /d "%SYSTEMROOT%" "${exePath}" "%DIR%" >nul 2>&1\r\n) else (\r\n    start "" /d "%SYSTEMROOT%" "${exePath}" %* >nul 2>&1\r\n)\r\nexit /b 0\r\n`;
         try {
             if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== cmdScript) {
                 fs.writeFileSync(cmdFile, cmdScript);

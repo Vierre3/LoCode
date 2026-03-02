@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
             .filter((e) => e.name !== ".LoCode")
             .map((e) => ({
                 name: e.name,
-                path: root === "/" ? `/${e.name}` : `${root}/${e.name}`,
+                path: join(root, e.name),
                 type: e.isDirectory() ? "dir" as const : "file" as const,
             }));
         return result;
