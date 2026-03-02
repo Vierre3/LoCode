@@ -20,9 +20,9 @@ jobs:
           - os: macos
             platform: mac
             artifact: .dmg
-          # - os: ubuntu
-          #   platform: linux
-          #   artifact: .AppImage
+          - os: ubuntu
+            platform: linux
+            artifact: .AppImage
 
     runs-on: ${{ matrix.os }}-latest
 
@@ -148,7 +148,7 @@ jobs:
 
 
   create_release:
-    # if: needs.check_tag_branch.outputs.on_main == 0
+    if: needs.check_tag_branch.outputs.on_main == 0
     needs: check_tag_branch
     runs-on: ubuntu-latest
     steps:
