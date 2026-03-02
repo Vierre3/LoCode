@@ -554,24 +554,30 @@ async function installCLI() {
             if (currentWsl === wslScript) {
                 log("[cli] WSL locode already up to date");
             } else {
-                // Step 1: write to WSL /tmp via stdin (no sudo needed, proven to work)
+                // Step 1: write script to WSL /tmp via stdin (no root needed)
                 const { spawnSync } = require("child_process");
                 spawnSync('wsl', ['-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], {
                     input: wslScript,
                     timeout: 5000,
                 });
-                // Step 2: run sudo in a NEW console window (Electron GUI has no TTY)
-                // Use `wsl bash -lic` for an interactive login shell so sudo can prompt
-                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
-                fs.writeFileSync(batFile,
+                // Step 2: open a REAL terminal window for sudo (Electron has no TTY)
+                // cmd.exe /c start opens a visible console where sudo can prompt
+                const batContent =
                     '@echo off\r\n' +
-                    'echo LoCode: installing "locode" command for WSL...\r\n' +
                     'echo.\r\n' +
-                    'wsl bash -lic "sudo mv /tmp/.locode-cli-tmp /usr/local/bin/locode && sudo chmod 755 /usr/local/bin/locode"\r\n' +
+                    'echo  LoCode: installing "locode" command for WSL...\r\n' +
                     'echo.\r\n' +
-                    'if exist "\\\\wsl$\\*\\usr\\local\\bin\\locode" (echo Installed successfully.) else (echo Installation failed.)\r\n' +
-                    'timeout /t 3 >nul\r\n');
-                execSync(`start "" /wait "${batFile}"`, { shell: 'cmd.exe', timeout: 60000 });
+                    'wsl -e sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"\r\n' +
+                    'echo.\r\n' +
+                    'echo  Done. This window will close automatically.\r\n' +
+                    'timeout /t 2 >nul\r\n';
+                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
+                fs.writeFileSync(batFile, batContent);
+                // spawnSync cmd.exe directly — start /wait opens a new console with a real TTY
+                spawnSync('cmd.exe', ['/c', 'start', '/wait', 'LoCode WSL Install', batFile], {
+                    timeout: 120000,
+                    stdio: 'ignore',
+                });
                 try { fs.unlinkSync(batFile); } catch {}
                 log("[cli] installed WSL /usr/local/bin/locode");
             }
