@@ -355,7 +355,7 @@ function getExpectedMacScript() {
 
 const cliDeclinedFile = path.join(app.getPath("userData"), ".cli-declined");
 
-function installCLI() {
+async function installCLI() {
     if (!isPacked) return;
 
     const platform = process.platform;
@@ -473,25 +473,31 @@ function installCLI() {
                     input: wslScript,
                     timeout: 5000,
                 });
-                // Step 2: open a REAL terminal window for sudo (Electron has no TTY)
-                // cmd.exe /c start opens a visible console where sudo can prompt
-                const batContent =
+                // Step 2: open a REAL visible terminal for sudo prompt
+                // Only `spawn` with `detached: true` creates a new console on Windows
+                // (spawnSync/execSync NEVER create a visible window from a GUI app)
+                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
+                fs.writeFileSync(batFile,
                     '@echo off\r\n' +
                     'echo.\r\n' +
                     'echo  LoCode: installing "locode" command for WSL...\r\n' +
                     'echo.\r\n' +
                     'wsl -e sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"\r\n' +
                     'echo.\r\n' +
-                    'echo  Done. This window will close automatically.\r\n' +
-                    'timeout /t 2 >nul\r\n';
-                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
-                fs.writeFileSync(batFile, batContent);
-                // spawnSync cmd.exe directly — start /wait opens a new console with a real TTY
-                spawnSync('cmd.exe', ['/c', 'start', '/wait', 'LoCode WSL Install', batFile], {
-                    timeout: 120000,
-                    stdio: 'ignore',
+                    'echo  Done.\r\n' +
+                    'timeout /t 2 >nul\r\n');
+                const { spawn } = require("child_process");
+                await new Promise((resolve) => {
+                    const child = spawn('cmd.exe', ['/c', batFile], {
+                        detached: true,
+                        stdio: 'ignore',
+                    });
+                    child.on('close', () => {
+                        try { fs.unlinkSync(batFile); } catch {}
+                        resolve();
+                    });
+                    child.on('error', () => resolve());
                 });
-                try { fs.unlinkSync(batFile); } catch {}
                 log("[cli] installed WSL /usr/local/bin/locode");
             }
         } catch (err) {
@@ -502,7 +508,7 @@ function installCLI() {
 }
 
 app.whenReady().then(async () => {
-    installCLI();
+    await installCLI();
     // ── Application menu (enables "New Window" in dock right-click on macOS) ──
     const isMac = process.platform === "darwin";
     const template = [
