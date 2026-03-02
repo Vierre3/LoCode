@@ -20,15 +20,9 @@ jobs:
           - os: macos
             platform: mac
             artifact: .dmg
-<<<<<<< HEAD
           - os: ubuntu
             platform: linux
             artifact: .AppImage
-=======
-          # - os: ubuntu
-          #   platform: linux
-          #   artifact: .AppImage
->>>>>>> 9dab579 (fix: carriage return on command)
 
     runs-on: ${{ matrix.os }}-latest
 
