@@ -427,7 +427,7 @@ async function installCLI() {
 
         // ── Write locode.cmd next to the exe ──
         const cmdFile = path.join(appDir, "locode.cmd");
-        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\nexit /b 0\r\n`;
+        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" /d "%SYSTEMROOT%" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" /d "%SYSTEMROOT%" "${exePath}" %*\r\n)\r\nexit /b 0\r\n`;
         try {
             if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== cmdScript) {
                 fs.writeFileSync(cmdFile, cmdScript);
@@ -469,9 +469,9 @@ async function installCLI() {
                 '    DIR="$(wslpath -w "$(cd "$1" && pwd)")"',
                 'fi',
                 'if [ -n "$DIR" ]; then',
-                `    "${wslExePath}" "$DIR" &`,
+                `    "${wslExePath}" "$DIR" >/dev/null 2>&1 &`,
                 'else',
-                `    "${wslExePath}" &`,
+                `    "${wslExePath}" >/dev/null 2>&1 &`,
                 'fi',
             ].join("\n") + "\n";
 
@@ -505,7 +505,8 @@ async function installCLI() {
                     spawnSync('wsl', ['-d', d, '-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], { input: wslScript, timeout: 5000 });
                 }
 
-                const batLines = ['@echo off', 'title LoCode WSL Install'];
+                // cd to a safe directory — CMD can't run in UNC paths (\\wsl.localhost\...)
+                const batLines = ['@echo off', 'cd /d %SYSTEMROOT%', 'title LoCode WSL Install'];
 
                 if (toAsk.length > 0) {
                     batLines.push(
