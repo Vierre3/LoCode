@@ -444,7 +444,18 @@ async function installCLI() {
 
         // ── WSL: shell script in /usr/local/bin so `locode .` works inside WSL ──
         try {
-            const wslExePath = execSync(`wsl -e wslpath -u "${exePath}"`, { encoding: "utf-8", timeout: 5000 }).trim();
+            log("[cli] WSL install: starting...");
+
+            // Convert Windows exe path to WSL path
+            let wslExePath;
+            try {
+                wslExePath = execSync(`wsl -e wslpath -u "${exePath}"`, { encoding: "utf-8", timeout: 10000 }).trim();
+            } catch (e) {
+                log(`[cli] WSL install: wslpath failed: ${e.message}`);
+                throw e;
+            }
+            log(`[cli] WSL install: wslExePath = ${wslExePath}`);
+
             const wslScript = [
                 '#!/bin/sh',
                 '# LoCode CLI (WSL) — opens a project in LoCode on Windows',
@@ -467,38 +478,51 @@ async function installCLI() {
             if (currentWsl === wslScript) {
                 log("[cli] WSL locode already up to date");
             } else {
+                log("[cli] WSL install: writing script to /tmp...");
+
                 // Step 1: write script to WSL /tmp via stdin (no root needed)
                 const { spawnSync } = require("child_process");
-                spawnSync('wsl', ['-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], {
+                const writeResult = spawnSync('wsl', ['-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp && chmod 755 /tmp/.locode-cli-tmp'], {
                     input: wslScript,
                     timeout: 5000,
                 });
-                // Step 2: open a REAL visible terminal for sudo prompt
-                // Only `spawn` with `detached: true` creates a new console on Windows
-                // (spawnSync/execSync NEVER create a visible window from a GUI app)
+                log(`[cli] WSL install: write to /tmp status=${writeResult.status}, error=${writeResult.error || 'none'}`);
+
+                // Verify the tmp file was written
+                try {
+                    const verify = execSync('wsl -e ls -la /tmp/.locode-cli-tmp', { encoding: "utf-8", timeout: 5000 }).trim();
+                    log(`[cli] WSL install: tmp file exists: ${verify}`);
+                } catch (e) {
+                    log(`[cli] WSL install: tmp file NOT written! ${e.message}`);
+                    throw e;
+                }
+
+                // Step 2: open a REAL visible cmd window using shell.openPath
+                // This is the ONLY reliable way to get a visible terminal from Electron
+                log("[cli] WSL install: opening terminal for sudo...");
                 const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
                 fs.writeFileSync(batFile,
                     '@echo off\r\n' +
+                    'title LoCode WSL Install\r\n' +
                     'echo.\r\n' +
-                    'echo  LoCode: installing "locode" command for WSL...\r\n' +
+                    'echo  LoCode needs to install the "locode" command in WSL.\r\n' +
+                    'echo  Please enter your sudo password when prompted.\r\n' +
                     'echo.\r\n' +
-                    'wsl -e sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"\r\n' +
+                    'wsl -e sudo mv /tmp/.locode-cli-tmp /usr/local/bin/locode\r\n' +
+                    'wsl -e sudo chmod 755 /usr/local/bin/locode\r\n' +
                     'echo.\r\n' +
-                    'echo  Done.\r\n' +
-                    'timeout /t 2 >nul\r\n');
-                const { spawn } = require("child_process");
-                await new Promise((resolve) => {
-                    const child = spawn('cmd.exe', ['/c', batFile], {
-                        detached: true,
-                        stdio: 'ignore',
-                    });
-                    child.on('close', () => {
-                        try { fs.unlinkSync(batFile); } catch {}
-                        resolve();
-                    });
-                    child.on('error', () => resolve());
-                });
-                log("[cli] installed WSL /usr/local/bin/locode");
+                    'echo  Done! You can now use "locode ." in WSL.\r\n' +
+                    'pause\r\n');
+
+                // shell.openPath = same as double-clicking the .bat in Explorer
+                // This ALWAYS opens a visible cmd.exe window
+                const { shell } = require("electron");
+                const openErr = await shell.openPath(batFile);
+                if (openErr) {
+                    log(`[cli] WSL install: shell.openPath error: ${openErr}`);
+                } else {
+                    log("[cli] WSL install: terminal window opened for sudo");
+                }
             }
         } catch (err) {
             log(`[cli] WSL install skipped: ${err.message}`);
