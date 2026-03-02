@@ -39,17 +39,17 @@ export function useLocodeConfig() {
     }
 
     async function loadConfig(rootPath: string): Promise<LocodeConfig> {
+        const cached = configCache.get(rootPath)
+        if (cached) return cached
+
+        let config = { ...DEFAULTS }
         try {
             const res = await apiFetch("/read?path=" + encodeURIComponent(configPath(rootPath)))
             if (res.ok) {
-                const text = await res.text()
-                const parsed = JSON.parse(text)
-                const config: LocodeConfig = { ...DEFAULTS, ...parsed }
-                configCache.set(rootPath, config)
-                return config
+                const parsed = JSON.parse(await res.text())
+                config = { ...DEFAULTS, ...parsed }
             }
         } catch {}
-        const config = { ...DEFAULTS }
         configCache.set(rootPath, config)
         return config
     }
