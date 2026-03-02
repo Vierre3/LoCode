@@ -415,7 +415,7 @@ function installCLI() {
 
         // ── Write locode.cmd next to the exe ──
         const cmdFile = path.join(appDir, "locode.cmd");
-        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\n`;
+        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\nexit /b 0\r\n`;
         try {
             if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== cmdScript) {
                 fs.writeFileSync(cmdFile, cmdScript);
@@ -425,23 +425,48 @@ function installCLI() {
             log(`[cli] failed to write locode.cmd: ${err.message}`);
         }
 
-        // ── Add app directory to user PATH (separate try-catch so cmd write isn't affected) ──
+        // ── Add app directory to user PATH ──
         try {
             let currentPath = "";
             try {
                 currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
             } catch {
-                // Path key doesn't exist yet — that's fine, we'll create it
+                // Path key doesn't exist yet — we'll create it
             }
             if (!currentPath.includes(appDir)) {
                 const newPath = currentPath ? `${currentPath};${appDir}` : appDir;
                 execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`, { stdio: "ignore" });
-                // Broadcast WM_SETTINGCHANGE so open shells pick up the new PATH
-                execSync('powershell -NoProfile -Command "[void][System.Environment]::GetEnvironmentVariable(\'Path\',\'User\')"', { stdio: "ignore" });
                 log(`[cli] added ${appDir} to user PATH`);
             }
         } catch (err) {
             log(`[cli] PATH update failed: ${err.message}`);
+        }
+
+        // ── WSL: shell script in ~/.local/bin so `locode .` works inside WSL ──
+        try {
+            const wslExePath = execSync(`wsl -e wslpath -u "${exePath}"`, { encoding: "utf-8", timeout: 5000 }).trim();
+            const wslScript = [
+                '#!/bin/sh',
+                '# LoCode CLI (WSL) — opens a project in LoCode on Windows',
+                'DIR=""',
+                'if [ -n "$1" ] && [ -d "$1" ]; then',
+                '    DIR="$(wslpath -w "$(cd "$1" && pwd)")"',
+                'fi',
+                'if [ -n "$DIR" ]; then',
+                `    "${wslExePath}" "$DIR" &`,
+                'else',
+                `    "${wslExePath}" &`,
+                'fi',
+            ].join("\n") + "\n";
+            // Install to ~/.local/bin (no sudo needed)
+            execSync(`wsl -e sh -c 'mkdir -p ~/.local/bin && cat > ~/.local/bin/locode && chmod 755 ~/.local/bin/locode'`, {
+                input: wslScript,
+                stdio: ["pipe", "ignore", "ignore"],
+                timeout: 5000,
+            });
+            log("[cli] installed WSL ~/.local/bin/locode");
+        } catch {
+            // WSL not installed or not available — skip silently
         }
     }
     // Linux: no auto-install (AppImage is portable)
