@@ -141,6 +141,9 @@ onMounted(async () => {
 
     doFit();
 
+    // Component may have been unmounted during the dimension await
+    if (!term || disposed) return;
+
     if (useLocalPty) {
         // ── Electron mode (local): IPC to main process (node-pty runs there) ──
         ipcCleanups.push(
