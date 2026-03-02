@@ -347,7 +347,6 @@ async function installCLI() {
         const appDir = path.dirname(process.execPath);
         const exePath = process.execPath;
 
-<<<<<<< HEAD
         // ── Compile locode.exe CLI stub (avoids .cmd carriage-return) ──
         const cliDir = path.join(appDir, "cli");
         const cliExe = path.join(cliDir, "locode.exe");
@@ -498,35 +497,6 @@ async function installCLI() {
             }
         } catch (err) {
             log(`[cli] WSL install skipped: ${err.message}`);
-=======
-        // ── Write locode.cmd next to the exe ──
-        const cmdFile = path.join(appDir, "locode.cmd");
-        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\nexit /b 0\r\n`;
-        try {
-            if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== cmdScript) {
-                fs.writeFileSync(cmdFile, cmdScript);
-                log(`[cli] wrote ${cmdFile}`);
-            }
-        } catch (err) {
-            log(`[cli] failed to write locode.cmd: ${err.message}`);
-        }
-
-        // ── Add app directory to user PATH ──
-        try {
-            let currentPath = "";
-            try {
-                currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
-            } catch {
-                // Path key doesn't exist yet — we'll create it
-            }
-            if (!currentPath.includes(appDir)) {
-                const newPath = currentPath ? `${currentPath};${appDir}` : appDir;
-                execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`, { stdio: "ignore" });
-                log(`[cli] added ${appDir} to user PATH`);
-            }
-        } catch (err) {
-            log(`[cli] PATH update failed: ${err.message}`);
->>>>>>> 36519d8 (fix: windows command install)
         }
 
         // ── WSL: shell script in /usr/local/bin so `locode .` works inside WSL ──
@@ -560,25 +530,31 @@ async function installCLI() {
                     input: wslScript,
                     timeout: 5000,
                 });
-                // Step 2: open a REAL terminal window for sudo (Electron has no TTY)
-                // cmd.exe /c start opens a visible console where sudo can prompt
-                const batContent =
+                // Step 2: open a REAL visible terminal for sudo prompt
+                // Only `spawn` with `detached: true` creates a new console on Windows
+                // (spawnSync/execSync NEVER create a visible window from a GUI app)
+                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
+                fs.writeFileSync(batFile,
                     '@echo off\r\n' +
                     'echo.\r\n' +
                     'echo  LoCode: installing "locode" command for WSL...\r\n' +
                     'echo.\r\n' +
                     'wsl -e sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"\r\n' +
                     'echo.\r\n' +
-                    'echo  Done. This window will close automatically.\r\n' +
-                    'timeout /t 2 >nul\r\n';
-                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
-                fs.writeFileSync(batFile, batContent);
-                // spawnSync cmd.exe directly — start /wait opens a new console with a real TTY
-                spawnSync('cmd.exe', ['/c', 'start', '/wait', 'LoCode WSL Install', batFile], {
-                    timeout: 120000,
-                    stdio: 'ignore',
+                    'echo  Done.\r\n' +
+                    'timeout /t 2 >nul\r\n');
+                const { spawn } = require("child_process");
+                await new Promise((resolve) => {
+                    const child = spawn('cmd.exe', ['/c', batFile], {
+                        detached: true,
+                        stdio: 'ignore',
+                    });
+                    child.on('close', () => {
+                        try { fs.unlinkSync(batFile); } catch {}
+                        resolve();
+                    });
+                    child.on('error', () => resolve());
                 });
-                try { fs.unlinkSync(batFile); } catch {}
                 log("[cli] installed WSL /usr/local/bin/locode");
             }
         } catch (err) {
@@ -590,7 +566,6 @@ async function installCLI() {
 // ── App lifecycle ────────────────────────────────────────────────────
 app.whenReady().then(async () => {
     await installCLI();
-
     const isMac = process.platform === "darwin";
     Menu.setApplicationMenu(Menu.buildFromTemplate([
         ...(isMac ? [{ role: "appMenu" }] : []),
