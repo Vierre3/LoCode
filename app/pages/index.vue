@@ -392,6 +392,10 @@ import type { LocodeConfig } from '~/composables/useLocodeConfig';
 const { loadConfig, saveConfig } = useLocodeConfig();
 const { apiFetch, getMode } = useApi();
 
+function emptyPane(id: string): EditorPane {
+    return { id, filePath: "", code: "", savedCode: "", language: "" };
+}
+
 const showSettings = ref(false);
 const isRemote = import.meta.client ? ref(getMode() !== "local") : ref(false);
 
@@ -442,11 +446,7 @@ function saveWorkspaceConfig() {
     });
 }
 
-watch(terminalSessionCount, () => saveWorkspaceConfig());
-watch(terminalSplitIndex, () => saveWorkspaceConfig());
-watch(terminalActiveSplitLeft, () => saveWorkspaceConfig());
-watch(terminalFocusedIndex, () => saveWorkspaceConfig());
-watch(terminalSavedPairs, () => saveWorkspaceConfig());
+watch([terminalSessionCount, terminalSplitIndex, terminalActiveSplitLeft, terminalFocusedIndex, terminalSavedPairs], () => saveWorkspaceConfig());
 
 // --- Config update handlers (from child emits) ---
 function onUpdateOpenFolders(folders: string[]) {
@@ -488,7 +488,7 @@ function resetToFolderSelector() {
     rootPath.value = "";
     localStorage.removeItem("locode:rootPath");
     electronSession?.setRoot("");
-    panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+    panes.value = [emptyPane("main")];
     activePaneId.value = "main";
     lastMtime.clear();
     if (terminalOpen.value) closeTerminal();
@@ -515,7 +515,7 @@ function focusEditorPane(paneId: string) {
 
 // --- Pane state ---
 const panes = ref<EditorPane[]>([
-    { id: "main", filePath: "", code: "", savedCode: "", language: "" }
+    emptyPane("main")
 ]);
 const activePaneId = ref("main");
 
@@ -674,8 +674,8 @@ async function restoreWorkspace(_path: string, config: LocodeConfig) {
     const files = config.paneFiles || [];
     if (files.length === 2 && files[0] && files[1]) {
         panes.value = [
-            { id: "left", filePath: "", code: "", savedCode: "", language: "" },
-            { id: "right", filePath: "", code: "", savedCode: "", language: "" },
+            emptyPane("left"),
+            emptyPane("right"),
         ];
         activePaneId.value = config.activePaneIndex === 1 ? "right" : "left";
         await Promise.all([
@@ -683,11 +683,11 @@ async function restoreWorkspace(_path: string, config: LocodeConfig) {
             loadFileIntoPane("right", files[1]),
         ]);
     } else if (files.length >= 1 && files[0]) {
-        panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+        panes.value = [emptyPane("main")];
         activePaneId.value = "main";
         await loadFileIntoPane("main", files[0]);
     } else {
-        panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+        panes.value = [emptyPane("main")];
         activePaneId.value = "main";
         terminalPanelRef.value?.resetSessions(1, -1);
     }
@@ -710,7 +710,6 @@ async function onSelectRoot(path: string) {
 function onSelectFile(path: string) {
     if (isMobile.value) sidebarOpen.value = false;
     const p = activePane.value;
-    // if (p && p.filePath === path) return;
     if (p && isPaneDirty(p)) {
         pendingAction = { type: "select", path };
         showUnsavedDialog.value = true;
@@ -729,7 +728,7 @@ function onEditorDrop(zone: "left" | "center" | "right", filePath: string, force
                 showUnsavedDialog.value = true;
                 return;
             }
-            panes.value = [{ id: "main", filePath: "", code: "", savedCode: "", language: "" }];
+            panes.value = [emptyPane("main")];
             activePaneId.value = "main";
             loadFileIntoPane("main", filePath);
         } else {
@@ -745,7 +744,7 @@ function onEditorDrop(zone: "left" | "center" | "right", filePath: string, force
         if (panes.value.length === 1) {
             const existing = panes.value[0]!;
             existing.id = "right";
-            const newPane: EditorPane = { id: "left", filePath: "", code: "", savedCode: "", language: "" };
+            const newPane = emptyPane("left");
             panes.value = [newPane, existing];
             activePaneId.value = "left";
             loadFileIntoPane("left", filePath);
@@ -762,7 +761,7 @@ function onEditorDrop(zone: "left" | "center" | "right", filePath: string, force
         }
     } else {
         if (panes.value.length === 1) {
-            const newPane: EditorPane = { id: "right", filePath: "", code: "", savedCode: "", language: "" };
+            const newPane = emptyPane("right");
             panes.value.push(newPane);
             activePaneId.value = "right";
             loadFileIntoPane("right", filePath);

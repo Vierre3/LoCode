@@ -3,47 +3,54 @@ import * as pty from "node-pty";
 import { existsSync } from "node:fs";
 
 const ptys = new Map<string, pty.IPty>();
+const WSL_PATH_RE = /^\\\\wsl[.$\\]/i;
+const WSL_PARSE_RE = /^\\\\wsl(?:\.localhost|\$)\\([^\\]+)(.*)$/i;
+
+function getShellConfig(cwd: string, home: string) {
+    const isWsl = process.platform === "win32" && WSL_PATH_RE.test(cwd);
+
+    if (isWsl) {
+        const m = cwd.match(WSL_PARSE_RE);
+        return {
+            shell: "wsl.exe",
+            args: ["-d", m?.[1] || "", "--cd", m?.[2]?.replace(/\\/g, "/") || "/"],
+            cwd: undefined as string | undefined,
+        };
+    }
+
+    const safeCwd = existsSync(cwd) ? cwd : (existsSync(home) ? home : "/");
+
+    if (process.platform === "win32") {
+        return { shell: "powershell.exe", args: [] as string[], cwd: safeCwd };
+    }
+
+    const shell = process.env.SHELL || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+    return { shell, args: [] as string[], cwd: safeCwd };
+}
+
+function cleanupPty(peerId: string) {
+    const term = ptys.get(peerId);
+    if (term) {
+        term.kill();
+        ptys.delete(peerId);
+    }
+}
 
 export default defineWebSocketHandler({
-    open(peer) {
-        // Wait for "create" message before spawning PTY
-    },
+    open(_peer) {},
 
     message(peer, msg) {
         let data: any;
         try {
             data = JSON.parse(typeof msg === "string" ? msg : msg.text());
-        } catch {
-            return;
-        }
+        } catch { return; }
 
         if (data.type === "create") {
-            // Don't create duplicate PTY for same peer
             if (ptys.has(peer.id)) return;
 
             const home = process.env.HOME || (process.platform === "darwin" ? `/Users/${process.env.USER || ""}` : "/home");
-            let cwd = typeof data.cwd === "string" && data.cwd ? data.cwd : home;
-
-            // Detect WSL paths BEFORE existsSync (Node on Windows can't stat \\wsl.localhost\...)
-            const isWslPath = process.platform === "win32" && /^\\\\wsl[.$\\]/i.test(cwd);
-
-            // Fallback to home or / if cwd doesn't exist (skip for WSL paths)
-            if (!isWslPath && !existsSync(cwd)) cwd = existsSync(home) ? home : "/";
-
-            let shell: string;
-            let shellArgs: string[] = [];
-            if (isWslPath) {
-                const m = cwd.match(/^\\\\wsl(?:\.localhost|\$)\\([^\\]+)(.*)$/i);
-                const distro = m?.[1] || "";
-                const linuxPath = m?.[2]?.replace(/\\/g, "/") || "/";
-                shell = "wsl.exe";
-                shellArgs = ["-d", distro, "--cd", linuxPath];
-            } else if (process.platform === "win32") {
-                shell = "powershell.exe";
-            } else {
-                shell = process.env.SHELL
-                    || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
-            }
+            const cwd = typeof data.cwd === "string" && data.cwd ? data.cwd : home;
+            const { shell, args, cwd: spawnCwd } = getShellConfig(cwd, home);
 
             // Ensure PATH includes standard dirs (macOS .app bundles have minimal PATH)
             const stdPath = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
@@ -51,11 +58,11 @@ export default defineWebSocketHandler({
 
             let term: pty.IPty;
             try {
-                term = pty.spawn(shell, shellArgs, {
+                term = pty.spawn(shell, args, {
                     name: "xterm-256color",
                     cols: data.cols || 80,
                     rows: data.rows || 24,
-                    cwd: isWslPath ? undefined : cwd,
+                    cwd: spawnCwd,
                     env: {
                         ...process.env,
                         PATH: envPath,
@@ -66,34 +73,22 @@ export default defineWebSocketHandler({
                 });
             } catch (err: any) {
                 try {
-                    peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[Terminal error: ${err.message}]\x1b[0m\r\n\x1b[90mshell=${shell}  cwd=${cwd}  platform=${process.platform}\x1b[0m\r\n` }));
+                    peer.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31m[Terminal error: ${err.message}]\x1b[0m\r\n` }));
                 } catch {}
                 return;
             }
 
             ptys.set(peer.id, term);
-
             term.onData((output: string) => {
-                try {
-                    peer.send(JSON.stringify({ type: "output", data: output }));
-                } catch {
-                    // Peer disconnected
-                }
+                try { peer.send(JSON.stringify({ type: "output", data: output })); } catch {}
             });
-
             term.onExit(({ exitCode }: { exitCode: number }) => {
-                try {
-                    peer.send(JSON.stringify({ type: "exit", code: exitCode }));
-                } catch {
-                    // Peer disconnected
-                }
+                try { peer.send(JSON.stringify({ type: "exit", code: exitCode })); } catch {}
                 ptys.delete(peer.id);
             });
         } else if (data.type === "input") {
             const term = ptys.get(peer.id);
-            if (term && typeof data.data === "string") {
-                term.write(data.data);
-            }
+            if (term && typeof data.data === "string") term.write(data.data);
         } else if (data.type === "resize") {
             const term = ptys.get(peer.id);
             if (term && typeof data.cols === "number" && typeof data.rows === "number") {
@@ -102,19 +97,6 @@ export default defineWebSocketHandler({
         }
     },
 
-    close(peer) {
-        const term = ptys.get(peer.id);
-        if (term) {
-            term.kill();
-            ptys.delete(peer.id);
-        }
-    },
-
-    error(peer) {
-        const term = ptys.get(peer.id);
-        if (term) {
-            term.kill();
-            ptys.delete(peer.id);
-        }
-    },
+    close(peer) { cleanupPty(peer.id); },
+    error(peer) { cleanupPty(peer.id); },
 });

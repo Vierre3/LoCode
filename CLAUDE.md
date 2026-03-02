@@ -10,27 +10,27 @@ L'objectif principal est la vitesse : chargement instantané, interactions fluid
 ## Architecture
 
 - **Frontend** : Nuxt 4 + Vue 3 + Monaco Editor (même moteur d'édition que VSCode)
-- **Backend** : Deno (serveur HTTP standalone, port 8080)
-- **Proxy** : Nuxt server route `server/api/[...url].ts` redirige les appels `/api/*` vers le backend Deno
+- **Backend local** : Nuxt server routes (`server/api/local/*`) pour les opérations fichier via Node.js fs
+- **Backend SSH** : Nuxt server routes (`server/api/ssh/*`) pour les opérations fichier via ssh2 SFTP
 - **Style** : Design glassmorphism (blur + transparence) avec Tailwind CSS via @nuxt/ui
-- **Desktop** : Electron wrapper (`electron/main.cjs`) qui lance Deno + Nuxt en sous-processus
+- **Desktop** : Electron wrapper (`electron/main.cjs`) qui lance Nuxt en sous-processus
 
 ### Modes de fonctionnement
 
 ```
 MODE LOCAL / DESKTOP
-  Electron BrowserWindow → localhost:3000
+  Electron BrowserWindow → localhost:{port}
     Nuxt Nitro
-      ├─ /api/* ──────────────────► Deno :8080 (file ops)
+      ├─ /api/local/* ────────────► Node.js fs (file ops)
       └─ /_terminal (WebSocket) ──► node-pty (shell local)
 
-MODE SSH DISTANT (site sur PC1, Deno sur PC3)
-  Navigateur (PC2) ──► Nuxt frontend (PC1)
-    ├─ /api/* + header X-Backend-Url ──► Deno distant :8080 (file ops)
-    └─ Terminal WS ──────────────────► Deno distant :8080/_terminal (PTY sur PC3)
+MODE SSH DISTANT
+  Navigateur ──► Nuxt frontend
+    ├─ /api/ssh/* ─────────────────► ssh2 SFTP (file ops sur machine distante)
+    └─ /_ssh-terminal (WebSocket) ─► ssh2 shell channel (PTY distant)
 ```
 
-En mode SSH, le navigateur se connecte directement au Deno distant pour le terminal (WebSocket `/_terminal`), bypassant Nitro/node-pty. L'URL du backend est configurée dans les paramètres (SettingsModal) et persistée dans `localStorage("locode:backendUrl")`.
+`useApi.ts` route automatiquement vers `/api/local/*` ou `/api/ssh/*` selon la config SSH dans `localStorage("locode:sshTarget")`. Le routage est transparent pour les composants.
 
 ## Structure du projet
 
@@ -50,8 +50,8 @@ app/                              # Frontend Nuxt
     TerminalPanel.vue             # Panel multi-terminaux avec sidebar et split
     SettingsModal.vue             # Modal paramètres (URL backend distant)
   composables/
-    useApi.ts                     # Fetch centralisé + routage WebSocket (local vs distant)
-    useLocodeConfig.ts            # Config workspace persistée (localStorage)
+    useApi.ts                     # Fetch centralisé : route vers /api/local/* ou /api/ssh/* + WebSocket
+    useLocodeConfig.ts            # Config workspace persistée (.LoCode file, cache mémoire)
   plugins/
     monaco.client.ts              # Initialisation des workers Monaco
   middleware/
@@ -63,7 +63,10 @@ backend/
   server.ts                       # API Deno (read/write/list + /_terminal WebSocket PTY)
 
 server/
-  api/[...url].ts                 # Proxy Nuxt → Deno (supporte header X-Backend-Url)
+  api/local/                        # Routes API mode local (Node.js fs)
+    read.get.ts, list.get.ts, write.post.ts, stat.get.ts, info.get.ts
+  api/ssh/                          # Routes API mode SSH (ssh2 SFTP)
+    read.get.ts, list.get.ts, write.post.ts, stat.get.ts, info.get.ts, connect.post.ts, disconnect.post.ts
   routes/
     _terminal.ts                  # WebSocket handler + node-pty (terminal local)
 
@@ -75,27 +78,25 @@ electron/
     electron-build.yml            # CI GitHub Actions : builds Windows/Mac/Linux en parallèle
 ```
 
-## API Backend (Deno)
+## API Backend
 
-Le serveur Deno expose 3 endpoints REST + 1 WebSocket :
+Les routes Nuxt server exposent les mêmes endpoints en mode local et SSH :
 
 | Route | Méthode | Description | Paramètres |
 |-------|---------|-------------|------------|
-| `/list` | GET | Liste le contenu d'un répertoire | `path` (query, défaut: `.`) |
-| `/read` | GET | Lit le contenu d'un fichier | `path` (query) |
-| `/write` | POST | Écrit/sauvegarde un fichier | `{ path, content }` (body JSON) |
-| `/_terminal` | WebSocket | Shell PTY sur la machine Deno | messages JSON (create/input/resize) |
+| `/api/{local,ssh}/list` | GET | Liste le contenu d'un répertoire | `path` (query) |
+| `/api/{local,ssh}/read` | GET | Lit le contenu d'un fichier | `path` (query) |
+| `/api/{local,ssh}/write` | POST | Écrit/sauvegarde un fichier | `{ path, content }` (body JSON) |
+| `/api/{local,ssh}/stat` | GET | Stats d'un fichier (mtime) | `path` (query) |
+| `/api/{local,ssh}/info` | GET | Info machine (home, user) | — |
+| `/_terminal` | WebSocket | Shell PTY local (node-pty) | messages JSON (create/input/resize) |
+| `/_ssh-terminal` | WebSocket | Shell PTY distant (ssh2) | messages JSON (create/input/resize) |
 
-Le frontend appelle les routes REST via `/api/list`, `/api/read`, `/api/write` — le proxy Nuxt redirige vers le backend Deno. En mode distant, le header `X-Backend-Url` indique au proxy l'URL cible.
-
-Le terminal local (mode desktop/web local) passe par `server/routes/_terminal.ts` (node-pty). En mode SSH distant, le terminal se connecte directement au WebSocket `/_terminal` du Deno distant.
+`useApi().apiFetch(path)` route automatiquement vers `/api/local` ou `/api/ssh` selon la config.
 
 ## Commandes
 
 ```bash
-# Démarrer le backend Deno (mode local)
-deno run --allow-all --unstable-pty backend/server.ts
-
 # Démarrer le frontend Nuxt (dev)
 npm run dev
 
@@ -114,24 +115,13 @@ npm run electron:build:mac     # DMG (macOS)
 npm run electron:build:win     # NSIS installer (Windows)
 ```
 
-Les deux serveurs doivent tourner simultanément en développement web.
-
-## Configuration
-
-Fichier `.env` à la racine :
-
-```
-DENO_URL="http://localhost"
-DENO_PORT="8080"
-```
+Le serveur Nuxt gère tout (API locale + SSH + terminal) en mode dev.
 
 ## Mode SSH distant — usage
 
-1. Sur la machine distante (PC3) : `deno run --allow-all --unstable-pty backend/server.ts`
-2. Tunnel SSH : `ssh -L 8080:localhost:8080 user@pc3`
-3. Dans LoCode settings (icône engrenage dans le header) : entrer `http://localhost:8080`
-4. L'explorateur de fichiers et l'éditeur opèrent sur le filesystem de PC3
-5. Le terminal spawn les shells sur PC3 via PTY over WebSocket
+1. Dans LoCode settings (icône engrenage dans le header) : entrer les informations SSH (host, port, username)
+2. L'explorateur de fichiers et l'éditeur opèrent sur le filesystem distant via SFTP (ssh2)
+3. Le terminal spawn les shells distants via ssh2 shell channel (WebSocket `/_ssh-terminal`)
 
 ## CI / Releases
 
@@ -152,8 +142,8 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Explorateur de fichiers avec chargement lazy des sous-dossiers
 - Lecture et écriture de fichiers via API REST
 - Design glassmorphism avec fond animé en gradient (bleu/vert)
-- Proxy Nuxt vers backend Deno (server route catch-all)
-- Préchargement du répertoire racine côté backend (cache mémoire au démarrage du serveur Deno)
+- Routes API local (`server/api/local/*`) pour les opérations fichier via Node.js fs
+- Routes API SSH (`server/api/ssh/*`) pour les opérations fichier via ssh2 SFTP
 - Layout responsive avec sidebar mobile en drawer slide-in depuis la gauche (bords arrondis)
 - Bouton hamburger pour toggle de la sidebar sur mobile (masqué sur desktop)
 - Fermeture automatique du drawer à la sélection d'un fichier sur mobile
@@ -180,10 +170,7 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Tooltip sur le chemin du fichier pour afficher le chemin complet au survol
 - Protection contre les fichiers trop volumineux (max 5 MB) côté backend — retourne HTTP 413 au lieu de crasher
 - Gestion des erreurs de lecture côté frontend (message affiché dans l'éditeur en plaintext)
-- Proxy Nuxt refactorisé avec `proxyRequest` (h3) — streaming des réponses au lieu de bufferisation mémoire, relai correct des status codes HTTP
-- Sécurité backend : protection path traversal (`isPathAllowed` vérifie que les chemins restent sous `/home`), validation des inputs (null check, type check), messages d'erreur génériques (pas de leak d'infos système), try-catch global sur le handler `serve()`
 - Validation POST `/write` : JSON parsing protégé, vérification des types `path` et `content`, status 500 en cas d'erreur d'écriture (au lieu de 200)
-- Headers `Content-Type: text/plain` sur toutes les réponses texte du backend
 - Correction memory leaks frontend : cleanup du listener `MediaQueryList`, cleanup des listeners resize si unmount pendant un drag, dispose du listener `onDidChangeModelContent` de Monaco
 - Watcher de `language` séparé dans MonacoEditor — le changement de coloration syntaxique s'applique indépendamment du changement de contenu
 - Restauration parallèle des dossiers ouverts (`Promise.all` au lieu de boucle séquentielle)
@@ -280,29 +267,36 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - `self.MonacoEnvironment.getWorker` défini pour router chaque langage vers le bon worker — élimine les erreurs console "You must define MonacoEnvironment.getWorkerUrl"
 
 ### App desktop Electron
-- `electron/main.cjs` (CommonJS, `.cjs` pour éviter le conflit avec `"type": "module"`) : spawn Deno backend + Nuxt server en sous-processus, attend que le port 3000 soit prêt via `net.createConnection`, crée `BrowserWindow` sur `http://127.0.0.1:3000`
-- Binaire Deno résolu dynamiquement : `process.resourcesPath/deno-bin/deno[.exe]` (packagé) ou `node_modules/deno/deno[.exe]` (dev)
-- `extraResources` dans `package.json` copie `node_modules/deno/deno` (ou `.exe`) vers `deno-bin/` dans le package final — filtre `["deno", "deno.exe"]` pour capturer la bonne plateforme
+- `electron/main.cjs` (CommonJS, `.cjs` pour éviter le conflit avec `"type": "module"`) : spawn Nuxt server en sous-processus via `ELECTRON_RUN_AS_NODE`, attend que le port soit prêt via `net.createConnection`, crée `BrowserWindow`
+- Port attribué dynamiquement via `getFreePort()` (bind port 0, récupère le port assigné)
 - `ELECTRON_CACHE` et `ELECTRON_BUILDER_CACHE` pointés sur des chemins workspace-relatifs dans le workflow CI pour un cache cross-platform cohérent
 - Liens externes ouverts dans le navigateur système via `setWindowOpenHandler` + `shell.openExternal`
 
 ### Mode SSH distant
-- `app/composables/useApi.ts` : composable centralisé `useApi()` exposant `apiFetch(path, options)` (ajoute le header `X-Backend-Url` si une URL distante est configurée) et `getWsUrl()` (retourne l'URL WebSocket du Deno distant ou le proxy local)
-- `app/components/SettingsModal.vue` : modal glassmorphism avec champ URL backend, persistance dans `localStorage("locode:backendUrl")`, hint SSH tunnel
-- `server/api/[...url].ts` : lit le header `X-Backend-Url` pour rediriger vers le backend distant au lieu de l'env local
-- `backend/server.ts` : endpoint `/_terminal` WebSocket avec `Deno.openPty()` (`--unstable-pty`) — spawn shell sur la machine Deno, stream PTY → WebSocket (messages JSON create/input/resize/output/exit), CORS headers sur toutes les réponses
+- `app/composables/useApi.ts` : composable centralisé `useApi()` exposant `apiFetch(path)` (route vers `/api/local/*` ou `/api/ssh/*` selon config), `getWsUrl()` (retourne `/_terminal` ou `/_ssh-terminal`), `getMode()` (retourne `"local"` ou `"ssh"`)
+- `app/components/SettingsModal.vue` : modal glassmorphism avec champs SSH (host, port, username), persistance dans `localStorage("locode:sshTarget")`
+- `server/api/ssh/*` : routes SFTP via ssh2 (read, write, list, stat, info, connect, disconnect)
+- `server/routes/_ssh-terminal.ts` : WebSocket handler pour shell distant via ssh2 shell channel
 - `Terminal.client.vue` : connexion WebSocket via `useApi().getWsUrl()` (local ou distant selon config)
 - Icône engrenage dans le header de `index.vue` avec indicateur visuel `.btn-remote` quand un backend distant est actif
+
+### Refactoring code cleanup
+- Suppression de `server/api/[...url].ts` (ancien proxy Deno catch-all, remplacé par routes `/api/local/*` et `/api/ssh/*`)
+- `useApi.ts` simplifié : déduplication logique protocole dans `getWsUrl()`, appel unique `getStoredSSHTarget()` par fonction
+- `useLocodeConfig.ts` : cache-first dans `loadConfig()` (skip requête disque si déjà en cache), déduplication des paths success/failure
+- `index.vue` : 5 watchers terminaux consolidés en 1 `watch([...], cb)`, factory `emptyPane(id)` extrait (8 duplications supprimées), suppression code commenté mort
+- `electron/main.cjs` : tous les `require("child_process")` centralisés en haut, helper `getWindowFromEvent(event)` extrait (déduplication lookup fenêtre par webContents), helper `parseWslPath()` + regex WSL partagées, `buildShellScript()` factorisé (macOS/WSL), logs de démarrage réduits, helper `installBlock()` pour génération bat WSL
+- `server/routes/_terminal.ts` : `getShellConfig()` extrait (shell + args + cwd selon plateforme/WSL), `cleanupPty()` dédupliqué (close/error handlers), regex WSL partagées
 
 ## Stack technique
 
 - **Nuxt** 4.x
 - **Vue** 3.5.x
 - **Monaco Editor** 0.53.0
-- **Deno** 2.4.x (backend)
 - **@nuxt/ui** 3.3.x + **@nuxt/ui-pro** 3.3.x
 - **Tailwind CSS** (via @nuxt/ui)
 - **@xterm/xterm** 6.0.0 + **@xterm/addon-fit** 0.11.0 + **@xterm/addon-web-links** 0.12.0
 - **node-pty** 1.1.0 (PTY backend pour le terminal local)
+- **ssh2** (connexion SSH + SFTP pour le mode distant)
 - **Electron** 36.x (desktop wrapper)
 - **electron-builder** 26.x (packaging installateurs)

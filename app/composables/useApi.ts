@@ -20,40 +20,20 @@ function getStoredSSHTarget(): { host: string; port: number; username: string } 
 }
 
 export function useApi() {
-    /**
-     * Fetch wrapper that routes to the correct backend based on mode.
-     */
     function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
-        const sshTarget = getStoredSSHTarget();
-        if (sshTarget) {
-            return fetch(`/api/ssh${path}`, { ...options });
-        }
-        return fetch(`/api/local${path}`, { ...options });
+        const prefix = getStoredSSHTarget() ? "/api/ssh" : "/api/local";
+        return fetch(`${prefix}${path}`, { ...options });
     }
 
-    /**
-     * Returns the WebSocket URL for the terminal.
-     */
     function getWsUrl(): string {
         if (!import.meta.client) return "";
-
-        const sshTarget = getStoredSSHTarget();
-        if (sshTarget) {
-            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            return `${protocol}//${window.location.host}/_ssh-terminal`;
-        }
-
-        // Local mode: node-pty via Nitro
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        return `${protocol}//${window.location.host}/_terminal`;
+        const endpoint = getStoredSSHTarget() ? "_ssh-terminal" : "_terminal";
+        return `${protocol}//${window.location.host}/${endpoint}`;
     }
 
-    /**
-     * Returns the current connection mode.
-     */
     function getMode(): "local" | "ssh" {
-        if (getStoredSSHTarget()) return "ssh";
-        return "local";
+        return getStoredSSHTarget() ? "ssh" : "local";
     }
 
     return { apiFetch, getWsUrl, getMode };
