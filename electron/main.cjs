@@ -15,13 +15,14 @@ if (!app.requestSingleInstanceLock()) {
 const isPacked = app.isPackaged;
 
 // ── CLI argument: `locode /path/to/dir` opens with that directory ────
-function parseDirArg(argv) {
+function parseDirArg(argv, cwd) {
     // In dev: ['electron', '.', '/path'] → skip 2; packed: ['/app', '/path'] → skip 1
     const skip = isPacked ? 1 : 2;
     for (let i = skip; i < argv.length; i++) {
         const arg = argv[i];
         if (arg.startsWith("-")) continue; // skip flags
-        const resolved = path.resolve(arg);
+        // Resolve relative to the provided cwd (caller's directory), not process.cwd()
+        const resolved = cwd ? path.resolve(cwd, arg) : path.resolve(arg);
         try {
             if (fs.statSync(resolved).isDirectory()) return resolved;
         } catch {}
@@ -202,8 +203,10 @@ function showError(message) {
 }
 
 // Second launch: create a new window with the dir arg, or focus existing window
-app.on("second-instance", (_event, argv) => {
-    const dirArg = parseDirArg(argv);
+app.on("second-instance", (_event, argv, workingDirectory) => {
+    log(`[second-instance] argv=${JSON.stringify(argv)} cwd=${workingDirectory}`);
+    const dirArg = parseDirArg(argv, workingDirectory);
+    log(`[second-instance] dirArg=${dirArg}`);
     if (dirArg) {
         // Open a new window with the requested directory
         const win = createWindow(dirArg);
@@ -260,19 +263,31 @@ ipcMain.handle("term:create", (_event, { id, cols, rows, cwd }) => {
         const pty = require("node-pty");
         const home = os.homedir();
         const termCwd = cwd || home;
-        const termShell = getShell();
 
-        // Spawn a login shell on macOS — Terminal.app and iTerm2 do the same.
-        // Without -l, /etc/zprofile isn't sourced → LANG/LC_ALL may be missing,
-        // causing zsh to miscount multi-byte characters (┌─✓❯) in the prompt.
-        const shellArgs = process.platform === "darwin" ? ["-l"] : [];
+        // Detect WSL paths (\\wsl.localhost\... or \\wsl$\...)
+        const isWslPath = process.platform === "win32" && /^\\\\wsl[.$\\]/i.test(termCwd);
 
-        log(`[pty] spawn id=${id} shell=${termShell} args=${shellArgs} cols=${cols} rows=${rows} cwd=${termCwd}`);
+        let termShell, shellArgs, spawnCwd;
+        if (isWslPath) {
+            const m = termCwd.match(/^\\\\wsl(?:\.localhost|\$)\\([^\\]+)(.*)$/i);
+            const distro = m?.[1] || "";
+            const linuxPath = m?.[2]?.replace(/\\/g, "/") || "/";
+            termShell = "wsl.exe";
+            shellArgs = ["-d", distro, "--cd", linuxPath];
+            spawnCwd = undefined; // wsl --cd handles it
+        } else {
+            termShell = getShell();
+            // Spawn a login shell on macOS — Terminal.app and iTerm2 do the same.
+            shellArgs = process.platform === "darwin" ? ["-l"] : [];
+            spawnCwd = fs.existsSync(termCwd) ? termCwd : home;
+        }
+
+        log(`[pty] spawn id=${id} shell=${termShell} args=${shellArgs} cols=${cols} rows=${rows} cwd=${spawnCwd || termCwd}`);
         const term = pty.spawn(termShell, shellArgs, {
             name: "xterm-256color",
             cols: cols || 80,
             rows: rows || 24,
-            cwd: fs.existsSync(termCwd) ? termCwd : home,
+            cwd: spawnCwd,
             env: {
                 ...process.env,
                 TERM: "xterm-256color",
@@ -355,7 +370,7 @@ function getExpectedMacScript() {
 
 const cliDeclinedFile = path.join(app.getPath("userData"), ".cli-declined");
 
-function installCLI() {
+async function installCLI() {
     if (!isPacked) return;
 
     const platform = process.platform;
@@ -409,29 +424,147 @@ function installCLI() {
             log(`[cli] macOS install ${alreadyInstalled ? "update" : "declined or"} failed: ${err.message}`);
         }
     } else if (platform === "win32") {
+        const { execSync } = require("child_process");
         const appDir = path.dirname(process.execPath);
-        const cmdFile = path.join(appDir, "locode.cmd");
         const exePath = process.execPath;
-        const script = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\n`;
+
+        // ── Write locode.cmd next to the exe ──
+        const cmdFile = path.join(appDir, "locode.cmd");
+        const cmdScript = `@start "" "${exePath}" %*`;
         try {
-            if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== script) {
-                fs.writeFileSync(cmdFile, script);
-                log(`[cli] installed ${cmdFile}`);
+            if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== cmdScript) {
+                fs.writeFileSync(cmdFile, cmdScript);
+                log(`[cli] wrote ${cmdFile}`);
             }
-            const currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
+        } catch (err) {
+            log(`[cli] failed to write locode.cmd: ${err.message}`);
+        }
+
+        // ── Add app directory to user PATH ──
+        try {
+            let currentPath = "";
+            try {
+                currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
+            } catch {
+                // Path key doesn't exist yet — we'll create it
+            }
             if (!currentPath.includes(appDir)) {
-                execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${currentPath};${appDir}" /f`, { stdio: "ignore" });
+                const newPath = currentPath ? `${currentPath};${appDir}` : appDir;
+                execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`, { stdio: "ignore" });
                 log(`[cli] added ${appDir} to user PATH`);
             }
         } catch (err) {
-            log(`[cli] Windows CLI install failed: ${err.message}`);
+            log(`[cli] PATH update failed: ${err.message}`);
+        }
+
+        // ── WSL: install `locode` command in all WSL distros ──
+        try {
+            const { spawnSync } = require("child_process");
+            const distros = execSync('wsl -l -q', { encoding: "utf-16le", timeout: 10000 })
+                .split(/\r?\n/).map(s => s.replace(/\0/g, '').trim()).filter(Boolean);
+            if (distros.length === 0) throw new Error("no WSL distros");
+
+            const wslExePath = execSync(`wsl -e wslpath -u "${exePath}"`, { encoding: "utf-8", timeout: 10000 }).trim();
+            const wslScript = [
+                '#!/bin/sh',
+                'DIR=""',
+                'if [ -n "$1" ] && [ -d "$1" ]; then',
+                '    DIR="$(wslpath -w "$(cd "$1" && pwd)")"',
+                'fi',
+                'if [ -n "$DIR" ]; then',
+                `    "${wslExePath}" "$DIR" >/dev/null 2>&1 &`,
+                'else',
+                `    "${wslExePath}" >/dev/null 2>&1 &`,
+                'fi',
+            ].join("\n") + "\n";
+
+            // Per-distro prefs: { "Ubuntu": "accepted", "Fedora": "declined" }
+            const wslPrefsFile = path.join(app.getPath("userData"), "wsl-cli-prefs.json");
+            let wslPrefs = {};
+            try { wslPrefs = JSON.parse(fs.readFileSync(wslPrefsFile, "utf-8")); } catch {}
+
+            // If binary exists in a distro, mark as accepted (user approved before)
+            for (const d of distros) {
+                try { execSync(`wsl -d ${d} -e test -f /usr/local/bin/locode`, { timeout: 5000 }); wslPrefs[d] = "accepted"; }
+                catch {} // not installed — keep current pref
+            }
+
+            // Which distros need install or update?
+            const needInstall = distros.filter(d => {
+                try { return execSync(`wsl -d ${d} -e cat /usr/local/bin/locode`, { encoding: "utf-8", timeout: 5000 }) !== wslScript; }
+                catch { return true; }
+            });
+
+            // Split: updates (previously accepted), new prompts (unknown), skip (declined)
+            const toUpdate = needInstall.filter(d => wslPrefs[d] === "accepted");
+            const toAsk = needInstall.filter(d => !wslPrefs[d]); // no pref yet
+            // declined distros: silently skipped
+
+            if (toUpdate.length === 0 && toAsk.length === 0) {
+                log("[cli] WSL: all distros up to date or declined");
+            } else {
+                // Write tmp files for all distros we'll touch
+                for (const d of [...toUpdate, ...toAsk]) {
+                    spawnSync('wsl', ['-d', d, '-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], { input: wslScript, timeout: 5000 });
+                }
+
+                // cd to a safe directory — CMD can't run in UNC paths (\\wsl.localhost\...)
+                const batLines = ['@echo off', 'cd /d %SYSTEMROOT%', 'title LoCode WSL Install'];
+
+                if (toAsk.length > 0) {
+                    batLines.push(
+                        'echo.',
+                        'echo  LoCode wants to install the "locode" command in your WSL distros',
+                        'echo  so you can open projects from WSL (e.g. locode .)',
+                        'echo.',
+                    );
+                }
+
+                // New distros: Y/n prompt, retry on wrong password
+                for (const d of toAsk) {
+                    const label = d.replace(/[^a-zA-Z0-9]/g, '_');
+                    batLines.push(
+                        `set /p REPLY="  Install in ${d}? [Y/n] "`,
+                        `if /i "%REPLY%"=="n" goto skip_${label}`,
+                        `if /i "%REPLY%"=="no" goto skip_${label}`,
+                        `:retry_${label}`,
+                        `wsl -d ${d} -- sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"`,
+                        `if errorlevel 1 goto retry_${label}`,
+                        `:skip_${label}`,
+                    );
+                }
+
+                // Previously accepted distros: silent update (just sudo, no prompt)
+                for (const d of toUpdate) {
+                    const label = d.replace(/[^a-zA-Z0-9]/g, '_');
+                    batLines.push(
+                        `:retry_${label}`,
+                        `wsl -d ${d} -- sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"`,
+                        `if errorlevel 1 goto retry_${label}`,
+                    );
+                }
+
+                batLines.push('exit');
+                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
+                fs.writeFileSync(batFile, batLines.join('\r\n') + '\r\n');
+                await require("electron").shell.openPath(batFile);
+
+                // Pessimistic: mark new distros as declined
+                // Next launch, if binary exists → flipped to "accepted"
+                for (const d of toAsk) wslPrefs[d] = "declined";
+                try { fs.writeFileSync(wslPrefsFile, JSON.stringify(wslPrefs)); } catch {}
+
+                log(`[cli] WSL install: ask=${toAsk.join(',')}, update=${toUpdate.join(',')}`);
+            }
+        } catch (err) {
+            log(`[cli] WSL install skipped: ${err.message}`);
         }
     }
     // Linux: no auto-install (AppImage is portable)
 }
 
 app.whenReady().then(async () => {
-    installCLI();
+    await installCLI();
     // ── Application menu (enables "New Window" in dock right-click on macOS) ──
     const isMac = process.platform === "darwin";
     const template = [

@@ -285,6 +285,33 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - `extraResources` dans `package.json` copie `node_modules/deno/deno` (ou `.exe`) vers `deno-bin/` dans le package final — filtre `["deno", "deno.exe"]` pour capturer la bonne plateforme
 - `ELECTRON_CACHE` et `ELECTRON_BUILDER_CACHE` pointés sur des chemins workspace-relatifs dans le workflow CI pour un cache cross-platform cohérent
 - Liens externes ouverts dans le navigateur système via `setWindowOpenHandler` + `shell.openExternal`
+- Single-instance lock via `app.requestSingleInstanceLock()` — un seul processus principal, les lancements suivants déclenchent `second-instance`
+
+### Commande CLI `locode`
+- `locode .` ou `locode /path/to/project` → ouvre l'app directement sur ce dossier (skip session restore)
+- `parseDirArg(argv, cwd)` : parse le premier argument qui résout vers un répertoire existant
+- `app.on("second-instance", (event, argv, workingDirectory))` : résout les chemins relatifs par rapport au CWD du second processus, ouvre une nouvelle fenêtre sur le dossier donné ou focus une fenêtre existante si pas d'argument
+- **macOS / Linux** : symlink `/usr/local/bin/locode` → binaire de l'app, prompt admin une seule fois, préférence "declined" persistée dans un fichier pour ne plus redemander
+- **Windows** : stub C# compilé à l'exécution via `csc.exe` (.NET Framework) dans `appDir/cli/locode.exe` — évite le retour chariot des fichiers `.cmd` ; fallback sur `locode.cmd` si compilation échoue ; `appDir/cli` ajouté au PATH utilisateur via registre (`HKCU\Environment`)
+
+### Support WSL (Windows Subsystem for Linux)
+- Install CLI dans toutes les distros WSL : détection via `wsl -l -q` (UTF-16LE), shell script `/usr/local/bin/locode` installé dans chaque distro
+- `shell.openPath(batFile)` pour ouvrir une fenêtre CMD visible (seul moyen d'avoir un prompt `sudo` depuis un GUI Electron sans TTY)
+- Prompts Y/n par distro avec préférences persistées dans `wsl-cli-prefs.json` (userData) : `"accepted"` / `"declined"` par distro, distros déjà installées auto-détectées comme `"accepted"`
+- Shell script WSL : convertit les chemins via `wslpath -w` et lance l'exe Windows en background
+- Terminal WSL : détecte les chemins UNC (`\\wsl.localhost\...` via regex `^\\\\wsl[.$\\]`), spawn `wsl.exe -d <distro> --cd <linuxPath>` au lieu de PowerShell — dans le IPC `term:create` (main.cjs, mode Electron) ET dans `server/routes/_terminal.ts` (mode web)
+- Fichiers WSL : `path.normalize()` ajouté dans les 4 routes server local (`read.get.ts`, `list.get.ts`, `stat.get.ts`, `write.post.ts`) pour restaurer les chemins UNC depuis `//wsl.localhost/...` (mangé par le parsing URL de H3/Nitro qui convertit `%5C` → `/`)
+- `encodeURIComponent()` sur les appels `apiFetch` frontend pour les chemins de fichiers (`FileExplorer.vue`, `index.vue`)
+
+### Améliorations diverses
+- Tri des fichiers dans l'explorateur (dossiers en premier, puis alphabétique)
+- `Ctrl+R` bloqué dans le terminal pour éviter le reload de la page
+- Effets glow sur les boutons (hover lumineux)
+- Bouton Save : style hover désactivé quand `disabled`
+- Messages d'erreur SSH améliorés (affichage clair en cas d'échec de connexion)
+- Limite max de terminaux
+- Reconnexion SSH automatique + barre de progression
+- Optimisations taille de l'app (réduction du bundle)
 
 ### Mode SSH distant
 - `app/composables/useApi.ts` : composable centralisé `useApi()` exposant `apiFetch(path, options)` (ajoute le header `X-Backend-Url` si une URL distante est configurée) et `getWsUrl()` (retourne l'URL WebSocket du Deno distant ou le proxy local)

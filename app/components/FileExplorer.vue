@@ -130,7 +130,7 @@ provide("hideTooltip", () => {
 
 async function loadTree(path: string, dirsOnly = false): Promise<any[]> {
     folder.value = path;
-    const res = await apiFetch("/list?path=" + path);
+    const res = await apiFetch("/list?path=" + encodeURIComponent(path));
     let items = await res.json();
     if (dirsOnly) items = items.filter((n: any) => n.type === "dir");
     return items;
