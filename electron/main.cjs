@@ -442,7 +442,7 @@ function installCLI() {
             log(`[cli] PATH update failed: ${err.message}`);
         }
 
-        // ── WSL: shell script in ~/.local/bin so `locode .` works inside WSL ──
+        // ── WSL: shell script in /usr/local/bin so `locode .` works inside WSL ──
         try {
             const wslExePath = execSync(`wsl -e wslpath -u "${exePath}"`, { encoding: "utf-8", timeout: 5000 }).trim();
             const wslScript = [
@@ -458,15 +458,15 @@ function installCLI() {
                 `    "${wslExePath}" &`,
                 'fi',
             ].join("\n") + "\n";
-            // Install to ~/.local/bin (no sudo needed)
-            execSync(`wsl -e sh -c 'mkdir -p ~/.local/bin && cat > ~/.local/bin/locode && chmod 755 ~/.local/bin/locode'`, {
+            execSync(`wsl -e sudo tee /usr/local/bin/locode`, {
                 input: wslScript,
                 stdio: ["pipe", "ignore", "ignore"],
                 timeout: 5000,
             });
-            log("[cli] installed WSL ~/.local/bin/locode");
+            execSync(`wsl -e sudo chmod 755 /usr/local/bin/locode`, { stdio: "ignore", timeout: 5000 });
+            log("[cli] installed WSL /usr/local/bin/locode");
         } catch {
-            // WSL not installed or not available — skip silently
+            // WSL not installed, sudo not available, or timeout — skip silently
         }
     }
     // Linux: no auto-install (AppImage is portable)
