@@ -514,9 +514,9 @@ async function installCLI() {
                 '    DIR="$(wslpath -w "$(cd "$1" && pwd)")"',
                 'fi',
                 'if [ -n "$DIR" ]; then',
-                `    "${wslExePath}" "$DIR" &`,
+                `    "${wslExePath}" "$DIR" >/dev/null 2>&1 &`,
                 'else',
-                `    "${wslExePath}" &`,
+                `    "${wslExePath}" >/dev/null 2>&1 &`,
                 'fi',
             ].join("\n") + "\n";
 
@@ -550,7 +550,8 @@ async function installCLI() {
                     spawnSync('wsl', ['-d', d, '-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], { input: wslScript, timeout: 5000 });
                 }
 
-                const batLines = ['@echo off', 'title LoCode WSL Install'];
+                // cd to a safe directory — CMD can't run in UNC paths (\\wsl.localhost\...)
+                const batLines = ['@echo off', 'cd /d %SYSTEMROOT%', 'title LoCode WSL Install'];
 
                 if (toAsk.length > 0) {
                     batLines.push(
