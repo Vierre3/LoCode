@@ -531,8 +531,7 @@ async function installCLI() {
                 for (const d of needInstall) {
                     spawnSync('wsl', ['-d', d, '-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], { input: wslScript, timeout: 5000 });
                     batLines.push(`echo  Installing in ${d}...`);
-                    // Use `wsl -d ... -- sudo` (no -e) so sudo gets proper terminal access
-                    batLines.push(`wsl -d "${d}" -- sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"`);
+                    batLines.push(`wsl -d ${d} -- sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"`);
                 }
                 batLines.push('echo.', 'echo  Done! You can now use "locode ." in WSL.', 'pause');
                 const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
