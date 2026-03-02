@@ -529,7 +529,7 @@ async function installCLI() {
 >>>>>>> 36519d8 (fix: windows command install)
         }
 
-        // ── WSL: shell script in /usr/local/bin so `locode .` works inside WSL ──
+        // ── WSL: shell script in ~/.local/bin so `locode .` works inside WSL ──
         try {
             const wslExePath = execSync(`wsl -e wslpath -u "${exePath}"`, { encoding: "utf-8", timeout: 5000 }).trim();
             const wslScript = [
@@ -549,20 +549,22 @@ async function installCLI() {
             // Check if already up to date
             let currentWsl = "";
             try {
-                currentWsl = execSync('wsl -e cat /usr/local/bin/locode', { encoding: "utf-8", timeout: 5000 });
+                currentWsl = execSync('wsl -e cat ~/.local/bin/locode', { encoding: "utf-8", timeout: 5000 });
             } catch {}
             if (currentWsl === wslScript) {
                 log("[cli] WSL locode already up to date");
             } else {
-                // Single command: pipe script content directly as root (no sudo, no temp file)
+                // Write to ~/.local/bin (no sudo needed) + ensure PATH includes it
                 const { spawnSync } = require("child_process");
-                const result = spawnSync('wsl', ['-u', 'root', 'sh', '-c',
-                    'cat > /usr/local/bin/locode && chmod 755 /usr/local/bin/locode'], {
+                const result = spawnSync('wsl', ['-e', 'sh', '-c',
+                    'mkdir -p ~/.local/bin && cat > ~/.local/bin/locode && chmod 755 ~/.local/bin/locode' +
+                    ' && (grep -q "/.local/bin" ~/.zshrc 2>/dev/null || echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.zshrc)' +
+                    ' && (grep -q "/.local/bin" ~/.bashrc 2>/dev/null || echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.bashrc)'], {
                     input: wslScript,
                     timeout: 10000,
                 });
                 if (result.status === 0) {
-                    log("[cli] installed WSL /usr/local/bin/locode");
+                    log("[cli] installed WSL ~/.local/bin/locode");
                 } else {
                     log(`[cli] WSL install failed: exit=${result.status} err=${result.stderr?.toString()}`);
                 }
