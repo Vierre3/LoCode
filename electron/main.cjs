@@ -409,22 +409,39 @@ function installCLI() {
             log(`[cli] macOS install ${alreadyInstalled ? "update" : "declined or"} failed: ${err.message}`);
         }
     } else if (platform === "win32") {
+        const { execSync } = require("child_process");
         const appDir = path.dirname(process.execPath);
-        const cmdFile = path.join(appDir, "locode.cmd");
         const exePath = process.execPath;
-        const script = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\n`;
+
+        // ── Write locode.cmd next to the exe ──
+        const cmdFile = path.join(appDir, "locode.cmd");
+        const cmdScript = `@echo off\r\nsetlocal\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start "" "${exePath}" "%DIR%"\r\n) else (\r\n    start "" "${exePath}" %*\r\n)\r\n`;
         try {
-            if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== script) {
-                fs.writeFileSync(cmdFile, script);
-                log(`[cli] installed ${cmdFile}`);
+            if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== cmdScript) {
+                fs.writeFileSync(cmdFile, cmdScript);
+                log(`[cli] wrote ${cmdFile}`);
             }
-            const currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
+        } catch (err) {
+            log(`[cli] failed to write locode.cmd: ${err.message}`);
+        }
+
+        // ── Add app directory to user PATH (separate try-catch so cmd write isn't affected) ──
+        try {
+            let currentPath = "";
+            try {
+                currentPath = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf-8" }).split("REG_EXPAND_SZ")[1]?.trim() || "";
+            } catch {
+                // Path key doesn't exist yet — that's fine, we'll create it
+            }
             if (!currentPath.includes(appDir)) {
-                execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${currentPath};${appDir}" /f`, { stdio: "ignore" });
+                const newPath = currentPath ? `${currentPath};${appDir}` : appDir;
+                execSync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`, { stdio: "ignore" });
+                // Broadcast WM_SETTINGCHANGE so open shells pick up the new PATH
+                execSync('powershell -NoProfile -Command "[void][System.Environment]::GetEnvironmentVariable(\'Path\',\'User\')"', { stdio: "ignore" });
                 log(`[cli] added ${appDir} to user PATH`);
             }
         } catch (err) {
-            log(`[cli] Windows CLI install failed: ${err.message}`);
+            log(`[cli] PATH update failed: ${err.message}`);
         }
     }
     // Linux: no auto-install (AppImage is portable)
