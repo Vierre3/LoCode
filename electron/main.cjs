@@ -467,20 +467,25 @@ function installCLI() {
             if (currentWsl === wslScript) {
                 log("[cli] WSL locode already up to date");
             } else {
-                // Step 1: write to /tmp via stdin (no sudo needed, proven to work)
-                execSync('wsl -e sh -c "cat > /tmp/.locode-cli-tmp"', {
+                // Step 1: write to WSL /tmp via stdin (no sudo needed, proven to work)
+                const { spawnSync } = require("child_process");
+                spawnSync('wsl', ['-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], {
                     input: wslScript,
                     timeout: 5000,
                 });
-                // Step 2: sudo mv + chmod (same execSync pattern that showed the sudo prompt)
-                execSync('wsl -e sudo mv /tmp/.locode-cli-tmp /usr/local/bin/locode', {
-                    stdio: ["pipe", "ignore", "ignore"],
-                    timeout: 30000,
-                });
-                execSync('wsl -e sudo chmod 755 /usr/local/bin/locode', {
-                    stdio: ["pipe", "ignore", "ignore"],
-                    timeout: 30000,
-                });
+                // Step 2: run sudo in a NEW console window (Electron GUI has no TTY)
+                // Use `wsl bash -lic` for an interactive login shell so sudo can prompt
+                const batFile = path.join(app.getPath("temp"), "locode-wsl-install.bat");
+                fs.writeFileSync(batFile,
+                    '@echo off\r\n' +
+                    'echo LoCode: installing "locode" command for WSL...\r\n' +
+                    'echo.\r\n' +
+                    'wsl bash -lic "sudo mv /tmp/.locode-cli-tmp /usr/local/bin/locode && sudo chmod 755 /usr/local/bin/locode"\r\n' +
+                    'echo.\r\n' +
+                    'if exist "\\\\wsl$\\*\\usr\\local\\bin\\locode" (echo Installed successfully.) else (echo Installation failed.)\r\n' +
+                    'timeout /t 3 >nul\r\n');
+                execSync(`start "" /wait "${batFile}"`, { shell: 'cmd.exe', timeout: 60000 });
+                try { fs.unlinkSync(batFile); } catch {}
                 log("[cli] installed WSL /usr/local/bin/locode");
             }
         } catch (err) {
