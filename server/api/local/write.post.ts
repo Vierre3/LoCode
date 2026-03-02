@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import { normalize } from "node:path";
 
 export default defineEventHandler(async (event) => {
     let body: { path?: unknown; content?: unknown };
@@ -8,10 +9,11 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, statusMessage: "Invalid JSON" });
     }
 
-    const { path, content } = body;
-    if (typeof path !== "string" || typeof content !== "string") {
+    const { path: rawPath, content } = body;
+    if (typeof rawPath !== "string" || typeof content !== "string") {
         throw createError({ statusCode: 400, statusMessage: "Invalid request: path and content must be strings" });
     }
+    const path = normalize(rawPath);
 
     try {
         await writeFile(path, content, "utf-8");
