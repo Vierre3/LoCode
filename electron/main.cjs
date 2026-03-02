@@ -430,7 +430,7 @@ async function installCLI() {
 
         // ── Write locode.cmd next to the exe ──
         const cmdFile = path.join(appDir, "locode.cmd");
-        const cmdScript = `@echo off\r\nset "DIR="\r\nif not "%~1"=="" if exist "%~1\\*" set "DIR=%~f1"\r\nif defined DIR (\r\n    start /b "" "${exePath}" "%DIR%" >nul 2>&1\r\n) else (\r\n    start /b "" "${exePath}" %* >nul 2>&1\r\n)\r\n`;
+        const cmdScript = `@start "" "${exePath}" %*\r\n`;
         try {
             if (!fs.existsSync(cmdFile) || fs.readFileSync(cmdFile, "utf-8") !== cmdScript) {
                 fs.writeFileSync(cmdFile, cmdScript);
