@@ -260,19 +260,31 @@ ipcMain.handle("term:create", (_event, { id, cols, rows, cwd }) => {
         const pty = require("node-pty");
         const home = os.homedir();
         const termCwd = cwd || home;
-        const termShell = getShell();
 
-        // Spawn a login shell on macOS — Terminal.app and iTerm2 do the same.
-        // Without -l, /etc/zprofile isn't sourced → LANG/LC_ALL may be missing,
-        // causing zsh to miscount multi-byte characters (┌─✓❯) in the prompt.
-        const shellArgs = process.platform === "darwin" ? ["-l"] : [];
+        // Detect WSL paths (\\wsl.localhost\... or \\wsl$\...)
+        const isWslPath = process.platform === "win32" && /^\\\\wsl[.$\\]/i.test(termCwd);
 
-        log(`[pty] spawn id=${id} shell=${termShell} args=${shellArgs} cols=${cols} rows=${rows} cwd=${termCwd}`);
+        let termShell, shellArgs, spawnCwd;
+        if (isWslPath) {
+            const m = termCwd.match(/^\\\\wsl(?:\.localhost|\$)\\([^\\]+)(.*)$/i);
+            const distro = m?.[1] || "";
+            const linuxPath = m?.[2]?.replace(/\\/g, "/") || "/";
+            termShell = "wsl.exe";
+            shellArgs = ["-d", distro, "--cd", linuxPath];
+            spawnCwd = undefined; // wsl --cd handles it
+        } else {
+            termShell = getShell();
+            // Spawn a login shell on macOS — Terminal.app and iTerm2 do the same.
+            shellArgs = process.platform === "darwin" ? ["-l"] : [];
+            spawnCwd = fs.existsSync(termCwd) ? termCwd : home;
+        }
+
+        log(`[pty] spawn id=${id} shell=${termShell} args=${shellArgs} cols=${cols} rows=${rows} cwd=${spawnCwd || termCwd}`);
         const term = pty.spawn(termShell, shellArgs, {
             name: "xterm-256color",
             cols: cols || 80,
             rows: rows || 24,
-            cwd: fs.existsSync(termCwd) ? termCwd : home,
+            cwd: spawnCwd,
             env: {
                 ...process.env,
                 TERM: "xterm-256color",
