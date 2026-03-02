@@ -554,21 +554,15 @@ async function installCLI() {
             if (currentWsl === wslScript) {
                 log("[cli] WSL locode already up to date");
             } else {
-                // Step 1: write to WSL /tmp via stdin (no sudo, no CRLF)
+                // Write to WSL /tmp via stdin (no root needed, avoids CRLF)
                 const { spawnSync } = require("child_process");
                 spawnSync('wsl', ['-e', 'sh', '-c', 'cat > /tmp/.locode-cli-tmp'], {
                     input: wslScript,
                     timeout: 5000,
                 });
-                // Step 2: sudo move + chmod (sudo can prompt for password via /dev/tty)
-                spawnSync('wsl', ['-e', 'sudo', 'mv', '/tmp/.locode-cli-tmp', '/usr/local/bin/locode'], {
-                    stdio: ['ignore', 'ignore', 'ignore'],
-                    timeout: 30000,
-                });
-                spawnSync('wsl', ['-e', 'sudo', 'chmod', '755', '/usr/local/bin/locode'], {
-                    stdio: ['ignore', 'ignore', 'ignore'],
-                    timeout: 30000,
-                });
+                // Use wsl -u root to move into /usr/local/bin (no sudo/password needed)
+                spawnSync('wsl', ['-u', 'root', 'mv', '/tmp/.locode-cli-tmp', '/usr/local/bin/locode'], { timeout: 5000 });
+                spawnSync('wsl', ['-u', 'root', 'chmod', '755', '/usr/local/bin/locode'], { timeout: 5000 });
                 log("[cli] installed WSL /usr/local/bin/locode");
             }
         } catch {
