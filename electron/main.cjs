@@ -422,9 +422,10 @@ async function installCLI() {
                 .split(/\r?\n/).map(s => s.replace(/\0/g, '').trim()).filter(Boolean);
             if (distros.length === 0) throw new Error("no WSL distros");
 
-            // Use cmd.exe to launch the exe as a proper Windows process
-            // Direct /mnt/c/ exe calls break Electron's single-instance lock
-            const escapedExe = exePath.replace(/\\/g, "\\\\"); // escape backslashes for sh double-quotes
+            // Launch via cmd.exe so the entire process chain is native Windows.
+            // Calling a Windows exe directly from WSL breaks Electron's
+            // single-instance lock IPC (named pipe not reachable cross-subsystem).
+            const winCliPath = (cliOk ? cliExe : exePath).replace(/\\/g, "\\\\");
             const wslScriptFull = [
                 '#!/bin/sh',
                 'DIR=""',
@@ -432,9 +433,9 @@ async function installCLI() {
                 '    DIR="$(wslpath -w "$(cd "$1" && pwd)")"',
                 'fi',
                 'if [ -n "$DIR" ]; then',
-                `    cmd.exe /c start "" "${escapedExe}" "$DIR" </dev/null >/dev/null 2>&1`,
+                `    cmd.exe /c "${winCliPath}" "$DIR" >/dev/null 2>&1 &`,
                 'else',
-                `    cmd.exe /c start "" "${escapedExe}" </dev/null >/dev/null 2>&1`,
+                `    cmd.exe /c "${winCliPath}" >/dev/null 2>&1 &`,
                 'fi',
             ].join("\n") + "\n";
 

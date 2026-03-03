@@ -17,9 +17,9 @@ jobs:
           - os: windows
             platform: win
             artifact: .exe
-          - os: macos
-            platform: mac
-            artifact: .dmg
+          # - os: macos
+          #   platform: mac
+          #   artifact: .dmg
           # - os: ubuntu
           #   platform: linux
           #   artifact: .AppImage

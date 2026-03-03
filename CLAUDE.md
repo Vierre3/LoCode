@@ -317,7 +317,7 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Polling mtime toutes les 1s (au lieu de 2s) pour les fichiers actuellement ouverts dans les panes
 - `refreshPaneFromDisk(paneId)` : compare le mtime courant au précédent, re-lit le fichier uniquement si changé sur le disque ET pas de modifications non sauvegardées
 - Le polling ne touche pas le cache — il met à jour uniquement le contenu du pane (`pane.code`, `pane.savedCode`)
-- Clic sur un fichier déjà ouvert dans un pane → focus du pane + refresh mtime en background (pas de rechargement complet)
+- Clic sur un fichier déjà ouvert dans un pane → focus du pane uniquement (le polling gère les changements disque)
 
 ### Persistance cross-mode (SSH ↔ local)
 - Les chemins dans `.LoCode` (`paneFiles`, `openFolders`) sont stockés en **relatif** par rapport au `rootPath` (ex: `src/index.ts` au lieu de `/home/py/project/src/index.ts`)
@@ -326,7 +326,8 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Résout le conflit entre chemins Linux (SSH depuis Mac) et chemins UNC Windows (`\\wsl.localhost\...` en mode local desktop)
 
 ### Lancement WSL amélioré
-- Shell script WSL détache stdin/stdout/stderr (`</dev/null >/dev/null 2>&1 &`) pour éviter que le processus Electron reste attaché au terminal WSL
+- Shell script WSL lance l'app via `cmd.exe /c` avec le CLI stub (`cli/locode.exe`) : garantit une chaîne de processus 100% Windows native, résout le problème de lock single-instance Electron inaccessible depuis WSL
+- Conversion des chemins WSL → Windows via `wslpath -w` avant de passer en argument
 - `second-instance` handler : `w.show()` + `setAlwaysOnTop(true/false)` pour forcer la fenêtre au premier plan sur Windows (contourne la protection anti-focus-stealing)
 
 ### Refactoring code cleanup
