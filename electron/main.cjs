@@ -422,9 +422,9 @@ async function installCLI() {
                 .split(/\r?\n/).map(s => s.replace(/\0/g, '').trim()).filter(Boolean);
             if (distros.length === 0) throw new Error("no WSL distros");
 
-            const wslExePath = execSync(`wsl -e wslpath -u "${exePath}"`, { encoding: "utf-8", timeout: 10000 }).trim();
-            const wslScript = buildShellScript(`"${wslExePath}" >/dev/null 2>&1`).replace(/ &\n/g, ' &\n');
-            // WSL version: wraps path with wslpath -w
+            // Use cmd.exe to launch the exe as a proper Windows process
+            // Direct /mnt/c/ exe calls break Electron's single-instance lock
+            const escapedExe = exePath.replace(/\\/g, "\\\\"); // escape backslashes for sh double-quotes
             const wslScriptFull = [
                 '#!/bin/sh',
                 'DIR=""',
@@ -432,9 +432,9 @@ async function installCLI() {
                 '    DIR="$(wslpath -w "$(cd "$1" && pwd)")"',
                 'fi',
                 'if [ -n "$DIR" ]; then',
-                `    "${wslExePath}" "$DIR" </dev/null >/dev/null 2>&1 &`,
+                `    cmd.exe /c start "" "${escapedExe}" "$DIR" </dev/null >/dev/null 2>&1`,
                 'else',
-                `    "${wslExePath}" </dev/null >/dev/null 2>&1 &`,
+                `    cmd.exe /c start "" "${escapedExe}" </dev/null >/dev/null 2>&1`,
                 'fi',
             ].join("\n") + "\n";
 
@@ -480,7 +480,8 @@ async function installCLI() {
                             `if /i "%REPLY%"=="n" goto skip_${label}`,
                             `if /i "%REPLY%"=="no" goto skip_${label}`);
                     }
-                    lines.push(`:retry_${label}`,
+                    lines.push(`echo   [${d}] Installing...`,
+                        `:retry_${label}`,
                         `wsl -d ${d} -- sudo sh -c "mv /tmp/.locode-cli-tmp /usr/local/bin/locode && chmod 755 /usr/local/bin/locode"`,
                         `if errorlevel 1 goto retry_${label}`);
                     if (prompt) lines.push(`:skip_${label}`);

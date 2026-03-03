@@ -727,12 +727,11 @@ async function onSelectRoot(path: string) {
 
 function onSelectFile(path: string) {
     if (isMobile.value) sidebarOpen.value = false;
-    // If file is already open in a pane, just focus it and refresh from disk
+    // If file is already open in a pane, just focus it (polling handles disk changes)
     const existing = panes.value.find(p => p.filePath === path);
     if (existing) {
         activePaneId.value = existing.id;
         editorAreaRef.value?.focusPane(existing.id);
-        refreshPaneFromDisk(existing.id);
         return;
     }
     const p = activePane.value;
