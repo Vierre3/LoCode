@@ -59,9 +59,6 @@ app/                              # Frontend Nuxt
   assets/css/
     main.css                      # Import Tailwind
 
-backend/
-  server.ts                       # API Deno (read/write/list + /_terminal WebSocket PTY)
-
 server/
   api/local/                        # Routes API mode local (Node.js fs)
     read.get.ts, list.get.ts, write.post.ts, stat.get.ts, info.get.ts
@@ -71,7 +68,7 @@ server/
     _terminal.ts                  # WebSocket handler + node-pty (terminal local)
 
 electron/
-  main.cjs                        # Process principal Electron (spawn Deno + Nuxt, BrowserWindow)
+  main.cjs                        # Process principal Electron (spawn Nuxt, BrowserWindow, CLI installer)
 
 .github/
   workflows/
