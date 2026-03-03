@@ -432,9 +432,9 @@ async function installCLI() {
                 '    DIR="$(wslpath -w "$(cd "$1" && pwd)")"',
                 'fi',
                 'if [ -n "$DIR" ]; then',
-                `    setsid "${wslExePath}" "$DIR" >/dev/null 2>&1 &`,
+                `    "${wslExePath}" "$DIR" </dev/null >/dev/null 2>&1 &`,
                 'else',
-                `    setsid "${wslExePath}" >/dev/null 2>&1 &`,
+                `    "${wslExePath}" </dev/null >/dev/null 2>&1 &`,
                 'fi',
             ].join("\n") + "\n";
 

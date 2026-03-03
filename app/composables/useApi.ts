@@ -9,7 +9,8 @@
 function getStoredSSHTarget(): { host: string; port: number; username: string } | null {
     if (!import.meta.client) return null;
     try {
-        const raw = localStorage.getItem("locode:sshTarget");
+        // sessionStorage = per-window (not shared across Electron windows)
+        const raw = sessionStorage.getItem("locode:sshTarget");
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed.host === "string" && typeof parsed.username === "string") {

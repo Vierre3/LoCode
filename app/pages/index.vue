@@ -599,7 +599,7 @@ onMounted(async () => {
     Object.keys(localStorage)
         .filter(k => legacyPrefixes.some(p => k.startsWith(p)))
         .forEach(k => localStorage.removeItem(k));
-    ["locode:sidebarWidth", "locode:splitRatio", "locode:terminalHeight", "locode:currentFile"].forEach(k => localStorage.removeItem(k));
+    ["locode:sidebarWidth", "locode:splitRatio", "locode:terminalHeight", "locode:currentFile", "locode:sshTarget"].forEach(k => localStorage.removeItem(k));
 
     if (rootPath.value) {
         // Sync rootPath to Electron session tracking (covers localStorage-restored roots)

@@ -30,7 +30,7 @@ MODE SSH DISTANT
     └─ /_ssh-terminal (WebSocket) ─► ssh2 shell channel (PTY distant)
 ```
 
-`useApi.ts` route automatiquement vers `/api/local/*` ou `/api/ssh/*` selon la config SSH dans `localStorage("locode:sshTarget")`. Le routage est transparent pour les composants.
+`useApi.ts` route automatiquement vers `/api/local/*` ou `/api/ssh/*` selon la config SSH dans `sessionStorage("locode:sshTarget")` (per-window). Le routage est transparent pour les composants.
 
 ## Structure du projet
 
@@ -298,11 +298,13 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 
 ### Mode SSH distant
 - `app/composables/useApi.ts` : composable centralisé `useApi()` exposant `apiFetch(path)` (route vers `/api/local/*` ou `/api/ssh/*` selon config), `getWsUrl()` (retourne `/_terminal` ou `/_ssh-terminal`), `getMode()` (retourne `"local"` ou `"ssh"`)
-- `app/components/SettingsModal.vue` : modal glassmorphism avec champs SSH (host, port, username), persistance dans `localStorage("locode:sshTarget")`
+- **Isolation per-window** : état SSH actif stocké dans `sessionStorage("locode:sshTarget")` (propre à chaque fenêtre Electron), credentials mémorisés dans `localStorage("locode:sshCreds")` (partagés). Ouvrir une nouvelle fenêtre = mode local par défaut, indépendamment des autres fenêtres connectées en SSH
+- `app/components/SettingsModal.vue` : modal glassmorphism avec champs SSH (host, port, username). À l'ouverture, charge depuis `sessionStorage` (connexion active) puis fallback `localStorage` (credentials sauvegardés). Connexion écrit dans les deux, déconnexion ne supprime que `sessionStorage`
 - `server/api/ssh/*` : routes SFTP via ssh2 (read, write, list, stat, info, connect, disconnect)
 - `server/routes/_ssh-terminal.ts` : WebSocket handler pour shell distant via ssh2 shell channel
 - `Terminal.client.vue` : connexion WebSocket via `useApi().getWsUrl()` (local ou distant selon config)
 - Icône engrenage dans le header de `index.vue` avec indicateur visuel `.btn-remote` quand un backend distant est actif
+- Cache fichier vidé à la connexion/déconnexion SSH (changement de filesystem)
 
 ### Cache fichier en mémoire
 - `fileCache` (`Map<string, CachedFile>`) : cache in-memory des fichiers ouverts, clé = chemin absolu, valeur = `{ code, language }`
@@ -324,7 +326,7 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Résout le conflit entre chemins Linux (SSH depuis Mac) et chemins UNC Windows (`\\wsl.localhost\...` en mode local desktop)
 
 ### Lancement WSL amélioré
-- Shell script WSL utilise `setsid` pour détacher complètement le processus Electron du terminal WSL (évite SIGHUP à la fermeture du terminal)
+- Shell script WSL détache stdin/stdout/stderr (`</dev/null >/dev/null 2>&1 &`) pour éviter que le processus Electron reste attaché au terminal WSL
 - `second-instance` handler : `w.show()` + `setAlwaysOnTop(true/false)` pour forcer la fenêtre au premier plan sur Windows (contourne la protection anti-focus-stealing)
 
 ### Refactoring code cleanup

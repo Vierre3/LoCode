@@ -108,9 +108,9 @@ watch(() => props.show, async (visible) => {
     error.value = "";
 
     if (import.meta.client) {
-        // Load SSH target
+        // Load SSH credentials: active connection (sessionStorage) or saved creds (localStorage)
         try {
-            const raw = localStorage.getItem("locode:sshTarget");
+            const raw = sessionStorage.getItem("locode:sshTarget") || localStorage.getItem("locode:sshCreds");
             if (raw) {
                 const parsed = JSON.parse(raw);
                 sshHost.value = parsed.host || "";
@@ -172,13 +172,15 @@ async function connect() {
         connected.value = true;
         connectedHost.value = sshHost.value;
 
-        // Persist SSH target (no password)
+        // Active connection in sessionStorage (per-window), creds in localStorage (remembered)
         if (import.meta.client) {
-            localStorage.setItem("locode:sshTarget", JSON.stringify({
+            const target = JSON.stringify({
                 host: sshHost.value,
                 port: sshPort.value || 22,
                 username: sshUsername.value,
-            }));
+            });
+            sessionStorage.setItem("locode:sshTarget", target);
+            localStorage.setItem("locode:sshCreds", target);
         }
         emit("saved");
         emit("connected");
@@ -197,7 +199,7 @@ async function disconnect() {
     connected.value = false;
     connectedHost.value = "";
     if (import.meta.client) {
-        localStorage.removeItem("locode:sshTarget");
+        sessionStorage.removeItem("locode:sshTarget");
     }
     emit("saved");
     emit("disconnected");
