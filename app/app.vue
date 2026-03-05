@@ -133,7 +133,7 @@
     .loader-progress-fill {
         height: 100%;
         border-radius: 2px;
-        background: linear-gradient(90deg, rgba(100, 180, 255, 0.6), rgba(100, 220, 180, 0.6));
+        background: linear-gradient(90deg, #09f, #6c3);/* rgba(100, 180, 255, 0.6), rgba(100, 220, 180, 0.6)); */
         animation: progress-indeterminate 5s cubic-bezier(0.4, 0, 0.2, 1);
     }
 

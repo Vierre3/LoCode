@@ -124,7 +124,9 @@ onMounted(async () => {
 
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(new WebLinksAddon((_event, uri) => {
+        window.open(uri, "_blank");
+    }));
     term.open(termContainer.value);
 
     // Wait until the container has real dimensions before fitting and spawning the PTY.
@@ -181,8 +183,14 @@ onMounted(async () => {
     }
 
     // Let Ctrl+J, Ctrl+S, Ctrl+R bubble up to the window handler
+    // Ctrl+Shift+C → copy selection to clipboard (Windows/Linux)
     term.attachCustomKeyEventHandler((event) => {
         if ((event.ctrlKey || event.metaKey) && (event.key === "j" || event.key === "s" || event.key === "r")) {
+            return false;
+        }
+        if (event.type === "keydown" && event.ctrlKey && event.shiftKey && event.key === "C") {
+            const sel = term!.getSelection();
+            if (sel) navigator.clipboard.writeText(sel);
             return false;
         }
         return true;

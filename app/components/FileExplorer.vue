@@ -128,12 +128,67 @@ provide("hideTooltip", () => {
     hoveredRawPath.value = "";
 });
 
-async function loadTree(path: string, dirsOnly = false): Promise<any[]> {
-    folder.value = path;
+async function fetchList(path: string, dirsOnly = false): Promise<any[]> {
     const res = await apiFetch("/list?path=" + encodeURIComponent(path));
     let items = await res.json();
     if (dirsOnly) items = items.filter((n: any) => n.type === "dir");
     return items;
+}
+
+async function loadTree(path: string, dirsOnly = false): Promise<any[]> {
+    folder.value = path;
+    return fetchList(path, dirsOnly);
+}
+
+// --- Worktree polling: reconcile visible directories every 1s ---
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function reconcileChildren(existing: any[], fresh: any[]) {
+    const freshMap = new Map(fresh.map(n => [n.path, n]));
+    const existingMap = new Map(existing.map(n => [n.path, n]));
+    // Remove deleted
+    for (let i = existing.length - 1; i >= 0; i--) {
+        if (!freshMap.has(existing[i].path)) existing.splice(i, 1);
+    }
+    // Add new + update names
+    for (const fn of fresh) {
+        const en = existingMap.get(fn.path);
+        if (!en) {
+            existing.push(fn);
+        } else if (en.name !== fn.name) {
+            en.name = fn.name;
+        }
+    }
+}
+
+async function pollVisibleDirs(nodes: any[]) {
+    const dirs = nodes.filter(n => n.type === "dir" && n.open && n.children);
+    await Promise.all(dirs.map(async (node) => {
+        try {
+            const fresh = await fetchList(node.path);
+            reconcileChildren(node.children, fresh);
+            await pollVisibleDirs(node.children);
+        } catch {}
+    }));
+    // Also reconcile the root level
+    if (nodes === tree.value && props.rootPath) {
+        try {
+            const fresh = await fetchList(props.rootPath);
+            reconcileChildren(tree.value, fresh);
+        } catch {}
+    }
+}
+
+function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(() => {
+        if (browsing.value || !props.rootPath || treeLoading.value) return;
+        pollVisibleDirs(tree.value);
+    }, 1000);
+}
+
+function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
 function getOpenPaths(nodes: any[]): string[] {
@@ -171,10 +226,12 @@ async function loadWorkTree() {
         }
     } finally {
         treeLoading.value = false;
+        startPolling();
     }
 }
 
 async function loadBrowseTree() {
+    stopPolling();
     treeLoading.value = true;
     try {
         // Determine target home path: from rootPath, API, or nothing
@@ -295,6 +352,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    stopPolling();
     window.removeEventListener("keydown", onEscape);
 });
 
