@@ -90,7 +90,7 @@
 </style>
 
 <script setup lang="ts">
-const { apiFetch } = useApi()
+const { apiFetch, isWebMode } = useApi()
 
 const props = defineProps<{
     openFiles: string[];
@@ -342,7 +342,11 @@ const unwatchInitialFolders = watch(() => props.initialOpenFolders, async (newVa
 
 onMounted(async () => {
     treeLoading.value = true;
-    if (!props.rootPath) {
+    // In web mode, don't try to browse until SSH is connected
+    if (isWebMode && !sessionStorage.getItem('locode:sshTarget')) {
+        treeLoading.value = false;
+        browsing.value = true;
+    } else if (!props.rootPath) {
         browsing.value = true;
         await loadBrowseTree();
     } else {
