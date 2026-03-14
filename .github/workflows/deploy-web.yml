@@ -1,8 +1,9 @@
 name: Deploy LoCode Web
 
 on:
-  push:
-    branches: ["main"]
+  # push:
+  #   branches:
+  #     - website
   workflow_dispatch:
 
 jobs:
@@ -10,12 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
@@ -24,8 +25,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          LOCODE_MODE: web
-          LOCODE_AUTH_TOKEN: ${{ secrets.LOCODE_AUTH_TOKEN }}
+          LOCODE_MODE: web  # Build-time: excludes node-pty from bundle
 
       - name: Deploy to Railway
         uses: bervProject/railway-deploy@main
