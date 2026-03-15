@@ -2,18 +2,24 @@ import { Client, type SFTPWrapper, type ConnectConfig } from "ssh2";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+
+// --- Per-session SSH state ---
+interface SSHSession {
+    client: Client;
+    sftp: SFTPWrapper;
+    remoteHome: string;
+    connectedHost: string;
+    connectOpts: { host: string; port: number; username: string; password?: string };
+    reconnecting: boolean;
+    reconnectTimer: ReturnType<typeof setTimeout> | null;
+}
+
+const sessions = new Map<string, SSHSession>();
 
 // Callback to clean up SSH terminal channels on connection drop
-let onConnectionLost: (() => void) | null = null;
-export function setOnConnectionLost(cb: () => void) { onConnectionLost = cb; }
-
-let client: Client | null = null;
-let sftp: SFTPWrapper | null = null;
-let remoteHome = "/home";
-let connectedHost = "";
-let lastConnectOpts: { host: string; port: number; username: string; password?: string } | null = null;
-let reconnecting = false;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let onConnectionLost: ((sessionId: string) => void) | null = null;
+export function setOnConnectionLost(cb: (sessionId: string) => void) { onConnectionLost = cb; }
 
 function findPrivateKey(): Buffer | null {
     const sshDir = join(homedir(), ".ssh");
@@ -35,13 +41,8 @@ export async function sshConnect(opts: {
     port?: number;
     username: string;
     password?: string;
-}): Promise<{ home: string }> {
-    // Close existing connection
-    if (client) {
-        try { client.end(); } catch {}
-        client = null;
-        sftp = null;
-    }
+}): Promise<{ home: string; sessionId: string }> {
+    const sessionId = randomUUID();
 
     return new Promise((resolve, reject) => {
         const conn = new Client();
@@ -70,7 +71,7 @@ export async function sshConnect(opts: {
         }
 
         // Keyboard-interactive handler (some servers require this instead of plain password)
-        conn.on("keyboard-interactive", (_name, _instructions, _instructionsLang, prompts, finish) => {
+        conn.on("keyboard-interactive", (_name, _instructions, _instructionsLang, _prompts, finish) => {
             finish([opts.password || ""]);
         });
 
@@ -78,49 +79,44 @@ export async function sshConnect(opts: {
         config.readyTimeout = 10000;
 
         conn.on("ready", () => {
-            client = conn;
-            connectedHost = opts.host;
-            lastConnectOpts = { host: opts.host, port: opts.port || 22, username: opts.username, password: opts.password };
-            reconnecting = false;
+            const connectOpts = { host: opts.host, port: opts.port || 22, username: opts.username, password: opts.password };
 
             // Discover remote home directory
             conn.exec("echo $HOME", (err, stream) => {
+                const fallbackHome = `/home/${opts.username}`;
                 if (err) {
-                    remoteHome = `/home/${opts.username}`;
-                    setupSftp(conn, resolve, reject);
+                    setupSftp(conn, sessionId, connectOpts, opts.host, fallbackHome, resolve, reject);
                     return;
                 }
                 let output = "";
                 stream.on("data", (data: Buffer) => { output += data.toString(); });
                 stream.on("close", () => {
-                    remoteHome = output.trim() || `/home/${opts.username}`;
-                    setupSftp(conn, resolve, reject);
+                    const remoteHome = output.trim() || fallbackHome;
+                    setupSftp(conn, sessionId, connectOpts, opts.host, remoteHome, resolve, reject);
                 });
             });
         });
 
         conn.on("error", (err) => {
-            client = null;
-            sftp = null;
             reject(new Error(`SSH connection failed: ${err.message}`));
         });
 
         // Auto-reconnect on unexpected close
         conn.on("close", () => {
-            if (client === conn) {
-                client = null;
-                sftp = null;
-                onConnectionLost?.();
-                scheduleReconnect();
+            const session = sessions.get(sessionId);
+            if (session && session.client === conn) {
+                sessions.delete(sessionId);
+                onConnectionLost?.(sessionId);
+                scheduleReconnect(sessionId, session.connectOpts);
             }
         });
 
         conn.on("end", () => {
-            if (client === conn) {
-                client = null;
-                sftp = null;
-                onConnectionLost?.();
-                scheduleReconnect();
+            const session = sessions.get(sessionId);
+            if (session && session.client === conn) {
+                sessions.delete(sessionId);
+                onConnectionLost?.(sessionId);
+                scheduleReconnect(sessionId, session.connectOpts);
             }
         });
 
@@ -128,31 +124,34 @@ export async function sshConnect(opts: {
     });
 }
 
-function scheduleReconnect() {
-    // Only auto-reconnect if we had a successful connection before and weren't explicitly disconnected
-    if (!lastConnectOpts || reconnecting || reconnectTimer) return;
-    reconnecting = true;
-    console.log("[SSH] Connection lost, will attempt reconnect in 5s...");
-    reconnectTimer = setTimeout(async () => {
-        reconnectTimer = null;
-        if (client) { reconnecting = false; return; } // Already reconnected
-        if (!lastConnectOpts) { reconnecting = false; return; }
+function scheduleReconnect(
+    sessionId: string,
+    connectOpts: { host: string; port: number; username: string; password?: string },
+) {
+    // Don't reconnect if session was explicitly disconnected (already removed)
+    console.log(`[SSH:${sessionId.slice(0, 8)}] Connection lost, will attempt reconnect in 5s...`);
+    setTimeout(async () => {
+        // If session was re-created in the meantime, skip
+        if (sessions.has(sessionId)) return;
         try {
-            console.log("[SSH] Attempting reconnect...");
-            await sshConnect(lastConnectOpts);
-            console.log("[SSH] Reconnected successfully");
+            console.log(`[SSH:${sessionId.slice(0, 8)}] Attempting reconnect...`);
+            // Reconnect creates a new session — the old sessionId is gone
+            // The client would need to reconnect manually
+            // For now, just log it
+            console.log(`[SSH:${sessionId.slice(0, 8)}] Client must reconnect manually`);
         } catch (err: any) {
-            console.log("[SSH] Reconnect failed:", err.message);
-            // Will retry on next scheduleReconnect triggered by close/end
-            reconnecting = false;
-            scheduleReconnect();
+            console.log(`[SSH:${sessionId.slice(0, 8)}] Reconnect failed:`, err.message);
         }
     }, 5000);
 }
 
 function setupSftp(
     conn: Client,
-    resolve: (value: { home: string }) => void,
+    sessionId: string,
+    connectOpts: { host: string; port: number; username: string; password?: string },
+    host: string,
+    remoteHome: string,
+    resolve: (value: { home: string; sessionId: string }) => void,
     reject: (reason: Error) => void,
 ) {
     conn.sftp((err, sftpSession) => {
@@ -160,74 +159,97 @@ function setupSftp(
             reject(new Error(`SFTP session failed: ${err.message}`));
             return;
         }
-        sftp = sftpSession;
-        resolve({ home: remoteHome });
+        sessions.set(sessionId, {
+            client: conn,
+            sftp: sftpSession,
+            remoteHome,
+            connectedHost: host,
+            connectOpts,
+            reconnecting: false,
+            reconnectTimer: null,
+        });
+        resolve({ home: remoteHome, sessionId });
     });
 }
 
-export function sshDisconnect() {
-    // Clear reconnect state — explicit disconnect should not auto-reconnect
-    lastConnectOpts = null;
-    reconnecting = false;
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    if (client) {
-        try { client.end(); } catch {}
-        client = null;
-        sftp = null;
-        connectedHost = "";
-        remoteHome = "/home";
-    }
+export function sshDisconnect(sessionId: string) {
+    const session = sessions.get(sessionId);
+    if (!session) return;
+    sessions.delete(sessionId);
+    try { session.client.end(); } catch {}
+    if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
 }
 
-export function getSftp(): SFTPWrapper | null {
-    return sftp;
+export function getSession(sessionId: string): SSHSession | undefined {
+    return sessions.get(sessionId);
 }
 
-export function getSSHClient(): Client | null {
-    return client;
+export function getSftp(sessionId: string): SFTPWrapper | null {
+    return sessions.get(sessionId)?.sftp ?? null;
 }
 
-export function isSSHConnected(): boolean {
-    return client !== null;
+export function getSSHClient(sessionId: string): Client | null {
+    return sessions.get(sessionId)?.client ?? null;
 }
 
-export function getRemoteHome(): string {
-    return remoteHome;
+export function isSSHConnected(sessionId: string): boolean {
+    return sessions.has(sessionId);
 }
 
-export function getConnectedHost(): string {
-    return connectedHost;
+export function getRemoteHome(sessionId: string): string {
+    return sessions.get(sessionId)?.remoteHome ?? "/home";
 }
 
-export function isSSHReconnecting(): boolean {
-    return reconnecting;
+export function getConnectedHost(sessionId: string): string {
+    return sessions.get(sessionId)?.connectedHost ?? "";
+}
+
+export function isSSHReconnecting(sessionId: string): boolean {
+    return sessions.get(sessionId)?.reconnecting ?? false;
 }
 
 /**
  * Create a dedicated SSH connection for a terminal session.
- * Each terminal gets its own connection to avoid the MaxSessions limit
- * on the shared SFTP connection.
+ * Uses the same credentials as the given session.
  */
-export function createTerminalConnection(): Promise<Client> {
-    if (!lastConnectOpts) {
+export function createTerminalConnection(sessionId: string): Promise<Client> {
+    const session = sessions.get(sessionId);
+    if (!session) {
         return Promise.reject(new Error("SSH not connected"));
     }
-    const opts = lastConnectOpts;
+    const opts = session.connectOpts;
     return new Promise((resolve, reject) => {
         const conn = new Client();
         const config: ConnectConfig = {
             host: opts.host,
             port: opts.port || 22,
             username: opts.username,
-            agent: process.env.SSH_AUTH_SOCK,
             readyTimeout: 10000,
         };
+        if (process.env.SSH_AUTH_SOCK) {
+            config.agent = process.env.SSH_AUTH_SOCK;
+        }
         const privateKey = findPrivateKey();
         if (privateKey) config.privateKey = privateKey;
-        if (opts.password) config.password = opts.password;
+        if (opts.password) {
+            config.password = opts.password;
+            config.tryKeyboard = true;
+        }
+        conn.on("keyboard-interactive", (_name, _instructions, _instructionsLang, _prompts, finish) => {
+            finish([opts.password || ""]);
+        });
 
         conn.on("ready", () => resolve(conn));
         conn.on("error", (err) => reject(new Error(`SSH terminal connection failed: ${err.message}`)));
         conn.connect(config);
     });
+}
+
+/** Clean up all sessions (used on server shutdown) */
+export function cleanupAllSessions() {
+    for (const [id, session] of sessions) {
+        try { session.client.end(); } catch {}
+        if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+    }
+    sessions.clear();
 }

@@ -99,7 +99,8 @@
 const props = defineProps<{ show: boolean }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void; (e: "connected"): void; (e: "disconnected"): void }>();
 
-const { isWebMode } = useApi();
+import { setSessionId, clearSessionId } from '~/composables/useApi';
+const { isWebMode, getSessionId } = useApi();
 
 const sshHost = ref("");
 const sshPort = ref(22);
@@ -129,7 +130,10 @@ watch(() => props.show, async (visible) => {
 
         // Check SSH connection status
         try {
-            const res = await fetch("/api/ssh/info");
+            const headers: Record<string, string> = {};
+            const sid = getSessionId();
+            if (sid) headers["X-SSH-Session"] = sid;
+            const res = await fetch("/api/ssh/info", { headers });
             const info = await res.json();
             connected.value = info.connected;
             connectedHost.value = info.host || "";
@@ -180,7 +184,7 @@ async function connect() {
         connected.value = true;
         connectedHost.value = sshHost.value;
 
-        // Active connection in sessionStorage (per-window), creds in localStorage (remembered)
+        // Store session ID and connection info
         if (import.meta.client) {
             const target = JSON.stringify({
                 host: sshHost.value,
@@ -189,6 +193,9 @@ async function connect() {
             });
             sessionStorage.setItem("locode:sshTarget", target);
             localStorage.setItem("locode:sshCreds", target);
+            if (data.sessionId) {
+                setSessionId(data.sessionId);
+            }
         }
         emit("saved");
         emit("connected");
@@ -202,12 +209,16 @@ async function connect() {
 
 async function disconnect() {
     try {
-        await fetch("/api/ssh/disconnect", { method: "POST" });
+        const headers: Record<string, string> = {};
+        const sid = getSessionId();
+        if (sid) headers["X-SSH-Session"] = sid;
+        await fetch("/api/ssh/disconnect", { method: "POST", headers });
     } catch {}
     connected.value = false;
     connectedHost.value = "";
     if (import.meta.client) {
         sessionStorage.removeItem("locode:sshTarget");
+        clearSessionId();
     }
     emit("saved");
     emit("disconnected");

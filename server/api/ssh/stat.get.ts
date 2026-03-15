@@ -1,5 +1,6 @@
 export default defineEventHandler(async (event) => {
-    const sftpSession = getSftp();
+    const sessionId = getSessionId(event);
+    const sftpSession = getSftp(sessionId);
     if (!sftpSession) {
         throw createError({ statusCode: 503, statusMessage: "SSH not connected" });
     }

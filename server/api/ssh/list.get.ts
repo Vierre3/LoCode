@@ -1,11 +1,12 @@
 export default defineEventHandler(async (event) => {
-    const sftpSession = getSftp();
+    const sessionId = getSessionId(event);
+    const sftpSession = getSftp(sessionId);
     if (!sftpSession) {
         throw createError({ statusCode: 503, statusMessage: "SSH not connected" });
     }
 
     const query = getQuery(event);
-    const root = (typeof query.path === "string" && query.path) ? query.path : getRemoteHome();
+    const root = (typeof query.path === "string" && query.path) ? query.path : getRemoteHome(sessionId);
 
     return new Promise((resolve, reject) => {
         sftpSession.readdir(root, (err, list) => {

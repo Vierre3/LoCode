@@ -18,10 +18,9 @@ export default defineEventHandler(async (event) => {
             username,
             password: typeof password === "string" ? password : undefined,
         });
-        return { ok: true, home: result.home };
+        return { ok: true, home: result.home, sessionId: result.sessionId };
     } catch (err: any) {
         console.error("[SSH connect error]", err.message, err.stack);
-        // Clean up error message — strip internal details (IPs, ports, paths)
         let msg = (err.message || "Connection failed")
             .replace(/^SSH connection failed:\s*/, "")
             .replace(/\d+\.\d+\.\d+\.\d+:\d+/g, "host")

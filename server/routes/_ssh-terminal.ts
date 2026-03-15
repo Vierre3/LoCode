@@ -2,9 +2,20 @@ import { defineWebSocketHandler } from "h3";
 import type { Client } from "ssh2";
 
 // Each terminal gets its own dedicated SSH connection + shell channel
-const terminalConns = new Map<string, { conn: Client; stream: any }>();
+const terminalConns = new Map<string, { conn: Client; stream: any; sessionId: string }>();
 
-// Clean up ALL stale terminals when the main SSH connection drops/reconnects
+// Clean up terminals for a specific SSH session (when that session's connection drops)
+export function cleanupSessionChannels(sessionId: string) {
+    for (const [id, entry] of terminalConns) {
+        if (entry.sessionId === sessionId) {
+            try { entry.stream.close(); } catch {}
+            try { entry.conn.end(); } catch {}
+            terminalConns.delete(id);
+        }
+    }
+}
+
+// Clean up ALL terminals (server shutdown)
 export function cleanupAllChannels() {
     for (const [id, { conn, stream }] of terminalConns) {
         try { stream.close(); } catch {}
@@ -29,7 +40,8 @@ export default defineWebSocketHandler({
         if (data.type === "create") {
             if (terminalConns.has(peer.id)) return;
 
-            if (!isSSHConnected()) {
+            const sessionId = data.sessionId;
+            if (!sessionId || !isSSHConnected(sessionId)) {
                 try {
                     peer.send(JSON.stringify({ type: "output", data: "\r\n\x1b[31m[SSH not connected]\x1b[0m\r\n" }));
                 } catch {}
@@ -40,7 +52,7 @@ export default defineWebSocketHandler({
             const rows = data.rows || 24;
 
             // Create a dedicated SSH connection for this terminal
-            createTerminalConnection()
+            createTerminalConnection(sessionId)
                 .then((conn) => {
                     conn.shell(
                         {
@@ -57,7 +69,7 @@ export default defineWebSocketHandler({
                                 return;
                             }
 
-                            terminalConns.set(peer.id, { conn, stream });
+                            terminalConns.set(peer.id, { conn, stream, sessionId });
 
                             // Mute output until clear has finished (hides MOTD/banners and cd command)
                             let muted = true;
@@ -68,7 +80,6 @@ export default defineWebSocketHandler({
                                     const str = chunk.toString();
                                     if (str.includes("\x1b[2J")) {
                                         muted = false;
-                                        // Don't forward the cd+clear output — send a clean reset instead
                                     }
                                     return;
                                 }

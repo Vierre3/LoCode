@@ -24,7 +24,7 @@ const props = defineProps<{
     focused: boolean;
 }>();
 
-const { getWsUrl, getMode } = useApi();
+const { getWsUrl, getMode, getSessionId } = useApi();
 
 const termContainer = ref<HTMLDivElement | null>(null);
 let term: Terminal | null = null;
@@ -68,6 +68,7 @@ function connectWs() {
             cwd: props.cwd || undefined,
             cols: term!.cols,
             rows: term!.rows,
+            sessionId: getSessionId(),
         }));
     };
 
