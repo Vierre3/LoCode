@@ -37,22 +37,24 @@
     .bg {
         filter: blur(2px);
         animation: slide 12s ease-in-out infinite alternate;
-        background-image: linear-gradient(-60deg, #09f 50%, #6c3 50%);
+        background-image: linear-gradient(-60deg, #1a1a2e 50%, #16213e 50%);
         position: fixed;
         left: -50%;
         right: -50%;
         top: 0;
         bottom: 0;
-        opacity: 0.5;
+        opacity: 1;
     }
 
     .bg2 {
+        background-image: linear-gradient(-60deg, #0f0f1a 50%, #1e1e2e 50%);
         animation-delay: -3s;
         animation-direction: alternate-reverse;
         animation-duration: 16s;
     }
 
     .bg3 {
+        background-image: linear-gradient(-60deg, #141425 50%, #1a1a30 50%);
         animation-delay: -6s;
         animation-duration: 20s;
     }
@@ -134,7 +136,7 @@
     .loader-progress-fill {
         height: 100%;
         border-radius: 2px;
-        background: linear-gradient(90deg, #09f, #6c3);/* rgba(100, 180, 255, 0.6), rgba(100, 220, 180, 0.6)); */
+        background: linear-gradient(90deg, rgba(140, 160, 200, 0.6), rgba(200, 210, 230, 0.4));
         animation: progress-indeterminate 5s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
