@@ -216,13 +216,18 @@ async function disconnect() {
     } catch {}
     connected.value = false;
     connectedHost.value = "";
+    sshPassword.value = "";
     if (import.meta.client) {
         sessionStorage.removeItem("locode:sshTarget");
+        localStorage.removeItem("locode:sshCreds");
         clearSessionId();
     }
     emit("saved");
     emit("disconnected");
-    emit("close");
+    // In web mode, keep modal open so user can reconnect
+    if (!isWebMode) {
+        emit("close");
+    }
 }
 </script>
 

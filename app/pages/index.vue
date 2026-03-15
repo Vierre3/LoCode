@@ -523,10 +523,6 @@ function onSSHConnected() {
 
 function onSSHDisconnected() {
     resetToFolderSelector();
-    // In web mode, reopen settings so the user can reconnect
-    if (isWebMode) {
-        showSettings.value = true;
-    }
 }
 
 const editorAreaRef = ref<{ splitRatio: number; focusPane: (id: string) => void } | null>(null);
