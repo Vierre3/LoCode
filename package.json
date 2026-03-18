@@ -90,5 +90,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "optionalDependencies": {
+    "commander": "^13.1.0"
   }
 }
