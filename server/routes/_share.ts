@@ -1,5 +1,5 @@
 import { defineWebSocketHandler } from "h3";
-import { getShare, registerControlPeer, unregisterControlPeer } from "~/server/utils/share";
+import { getShare, registerControlPeer, unregisterControlPeer } from "../utils/share";
 
 /**
  * Control WebSocket for share sessions.

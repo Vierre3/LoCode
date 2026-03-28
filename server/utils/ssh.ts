@@ -180,7 +180,7 @@ export function sshDisconnect(sessionId: string) {
     if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
 }
 
-export function getSession(sessionId: string): SSHSession | undefined {
+export function getSSHSession(sessionId: string): SSHSession | undefined {
     return sessions.get(sessionId);
 }
 

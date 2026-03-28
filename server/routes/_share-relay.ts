@@ -2,7 +2,7 @@ import { defineWebSocketHandler } from "h3";
 import {
     getShare, setHostRelayPeer, clearHostRelayPeer, resolveRelayResponse,
     broadcastToTerminalPeers, removeTerminal,
-} from "~/server/utils/share";
+} from "../utils/share";
 
 // Track which peer is associated with which shareId for cleanup
 const peerShareMap = new Map<string, string>();

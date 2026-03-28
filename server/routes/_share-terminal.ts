@@ -1,6 +1,6 @@
 import { defineWebSocketHandler } from "h3";
-import { getShare, registerTerminalPeer, unregisterTerminalPeer, broadcastToTerminalPeers, removeTerminal } from "~/server/utils/share";
-import { createTerminalConnection } from "~/server/utils/ssh";
+import { getShare, registerTerminalPeer, unregisterTerminalPeer, broadcastToTerminalPeers, removeTerminal } from "../utils/share";
+import { createTerminalConnection } from "../utils/ssh";
 import type { Client } from "ssh2";
 
 // Track peer → subscribed terminals for cleanup
