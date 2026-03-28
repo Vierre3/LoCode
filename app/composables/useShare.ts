@@ -1,0 +1,322 @@
+/**
+ * Share session composable.
+ *
+ * Manages collaborative session state for both host and guest roles.
+ * - Host: creates share, manages guests, optionally relays desktop SSH
+ * - Guest: joins share via link, reads/writes through /api/share/* proxy
+ *
+ * Singleton state (shared across components via Vue reactivity).
+ */
+
+export interface ShareGuest {
+    id: string;
+    name: string;
+}
+
+// --- Singleton reactive state ---
+const shareId = ref<string | null>(null);
+const guestId = ref<string | null>(null);
+const role = ref<"host" | "guest" | null>(null);
+const hostName = ref("");
+const allowTerminal = ref(false);
+const rootPath = ref("");
+const guests = ref<ShareGuest[]>([]);
+const connected = ref(false);
+
+// Control WebSocket (presence + lifecycle events)
+let controlWs: WebSocket | null = null;
+// Relay WebSocket (desktop host only — forwards guest requests)
+let relayWs: WebSocket | null = null;
+
+export function useShare() {
+    const isHost = computed(() => role.value === "host");
+    const isGuest = computed(() => role.value === "guest");
+    const isSharing = computed(() => !!shareId.value);
+
+    // --- Host: create share ---
+    async function createShare(opts: {
+        rootPath: string;
+        backendMode: "local" | "ssh";
+        hostSessionId?: string;
+        allowTerminal: boolean;
+        hostName: string;
+    }): Promise<{ shareId: string; shareUrl: string }> {
+        const res = await fetch("/api/share/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(opts),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+
+        shareId.value = data.shareId;
+        role.value = "host";
+        hostName.value = opts.hostName;
+        allowTerminal.value = opts.allowTerminal;
+        rootPath.value = opts.rootPath;
+        guests.value = [];
+        connected.value = true;
+
+        connectControlWs(data.shareId, "host", "host");
+
+        // If relay mode (no hostSessionId → desktop host), connect relay WS
+        if (!opts.hostSessionId) {
+            connectRelayWs(data.shareId);
+        }
+
+        return { shareId: data.shareId, shareUrl: data.shareUrl };
+    }
+
+    // --- Guest: join share ---
+    async function joinShare(id: string, name?: string): Promise<void> {
+        const res = await fetch("/api/share/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shareId: id, name }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+
+        shareId.value = id;
+        guestId.value = data.guestId;
+        role.value = "guest";
+        hostName.value = data.hostName;
+        allowTerminal.value = data.allowTerminal;
+        rootPath.value = data.rootPath;
+        guests.value = data.guests || [];
+        connected.value = true;
+
+        connectControlWs(id, "guest", data.guestId);
+    }
+
+    // --- Host: close share ---
+    async function closeShare(): Promise<void> {
+        if (!shareId.value) return;
+        try {
+            await fetch("/api/share/close", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ shareId: shareId.value }),
+            });
+        } catch {}
+        cleanup();
+    }
+
+    // --- Guest: leave share ---
+    async function leaveShare(): Promise<void> {
+        if (!shareId.value || !guestId.value) return;
+        try {
+            await fetch("/api/share/leave", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ shareId: shareId.value, guestId: guestId.value }),
+            });
+        } catch {}
+        cleanup();
+    }
+
+    // --- Host: update settings ---
+    async function updateSettings(settings: { allowTerminal?: boolean }): Promise<void> {
+        if (!shareId.value) return;
+        await fetch("/api/share/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shareId: shareId.value, ...settings }),
+        });
+        if (settings.allowTerminal !== undefined) {
+            allowTerminal.value = settings.allowTerminal;
+        }
+    }
+
+    // --- Host: refresh info ---
+    async function refreshInfo(): Promise<void> {
+        if (!shareId.value) return;
+        try {
+            const res = await fetch(`/api/share/info?shareId=${shareId.value}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            guests.value = data.guests || [];
+            allowTerminal.value = data.allowTerminal;
+        } catch {}
+    }
+
+    // --- Control WebSocket ---
+    function connectControlWs(sid: string, r: "host" | "guest", userId: string) {
+        if (!import.meta.client) return;
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const url = `${protocol}//${window.location.host}/_share`;
+        controlWs = new WebSocket(url);
+
+        controlWs.onopen = () => {
+            controlWs?.send(JSON.stringify({ type: "auth", shareId: sid, role: r, userId }));
+        };
+
+        controlWs.onmessage = (ev) => {
+            try {
+                const msg = JSON.parse(ev.data);
+                handleControlMessage(msg);
+            } catch {}
+        };
+
+        controlWs.onclose = () => {
+            controlWs = null;
+        };
+    }
+
+    function handleControlMessage(msg: any) {
+        switch (msg.type) {
+            case "auth-ok":
+                break;
+            case "guest-joined":
+                if (msg.guest) {
+                    guests.value = [...guests.value, msg.guest];
+                }
+                break;
+            case "guest-left":
+                guests.value = guests.value.filter(g => g.id !== msg.guestId);
+                break;
+            case "settings-changed":
+                if (msg.allowTerminal !== undefined) {
+                    allowTerminal.value = msg.allowTerminal;
+                }
+                break;
+            case "share-closed":
+                // Host closed the share — guest gets kicked
+                if (role.value === "guest") {
+                    cleanup();
+                    onShareClosed?.();
+                }
+                break;
+        }
+    }
+
+    // --- Relay WebSocket (desktop host only) ---
+    function connectRelayWs(sid: string) {
+        if (!import.meta.client) return;
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const url = `${protocol}//${window.location.host}/_share-relay`;
+        relayWs = new WebSocket(url);
+
+        relayWs.onopen = () => {
+            relayWs?.send(JSON.stringify({ type: "auth", shareId: sid }));
+        };
+
+        relayWs.onmessage = (ev) => {
+            try {
+                const msg = JSON.parse(ev.data);
+                handleRelayMessage(msg);
+            } catch {}
+        };
+
+        relayWs.onclose = () => {
+            relayWs = null;
+        };
+    }
+
+    async function handleRelayMessage(msg: any) {
+        if (msg.type === "auth-ok") return;
+
+        if (msg.type === "request") {
+            // Desktop host handles relay request locally
+            const { apiFetch } = useApi();
+            try {
+                let res: Response;
+                const { id, action, ...params } = msg;
+                if (action === "read") {
+                    res = await apiFetch(`/read?path=${encodeURIComponent(params.path)}`);
+                } else if (action === "list") {
+                    res = await apiFetch(`/list?path=${encodeURIComponent(params.path)}`);
+                } else if (action === "stat") {
+                    res = await apiFetch(`/stat?path=${encodeURIComponent(params.path)}`);
+                } else if (action === "write") {
+                    res = await apiFetch("/write", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ path: params.path, content: params.content }),
+                    });
+                } else {
+                    relayWs?.send(JSON.stringify({ type: "response", id, status: 400, body: "Unknown action" }));
+                    return;
+                }
+
+                const body = res.headers.get("content-type")?.includes("json")
+                    ? await res.json()
+                    : await res.text();
+                relayWs?.send(JSON.stringify({ type: "response", id, status: res.status, body }));
+            } catch (err: any) {
+                relayWs?.send(JSON.stringify({ type: "response", id: msg.id, status: 500, body: err.message }));
+            }
+        }
+
+        // Terminal relay messages from server
+        if (msg.type === "terminal-create") {
+            onRelayTerminalCreate?.(msg);
+        }
+        if (msg.type === "terminal-input") {
+            onRelayTerminalInput?.(msg);
+        }
+        if (msg.type === "terminal-resize") {
+            onRelayTerminalResize?.(msg);
+        }
+    }
+
+    function sendRelayMessage(msg: any) {
+        relayWs?.send(JSON.stringify(msg));
+    }
+
+    // --- Shared terminal WebSocket URL ---
+    function getShareTerminalWsUrl(): string {
+        if (!import.meta.client) return "";
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${protocol}//${window.location.host}/_share-terminal`;
+    }
+
+    // --- Cleanup ---
+    function cleanup() {
+        shareId.value = null;
+        guestId.value = null;
+        role.value = null;
+        hostName.value = "";
+        allowTerminal.value = false;
+        rootPath.value = "";
+        guests.value = [];
+        connected.value = false;
+
+        if (controlWs) { controlWs.close(); controlWs = null; }
+        if (relayWs) { relayWs.close(); relayWs = null; }
+    }
+
+    return {
+        // State
+        shareId: readonly(shareId),
+        guestId: readonly(guestId),
+        role: readonly(role),
+        hostName: readonly(hostName),
+        allowTerminal: readonly(allowTerminal),
+        shareRootPath: readonly(rootPath),
+        guests: readonly(guests),
+        connected: readonly(connected),
+
+        // Computed
+        isHost,
+        isGuest,
+        isSharing,
+
+        // Actions
+        createShare,
+        joinShare,
+        closeShare,
+        leaveShare,
+        updateSettings,
+        refreshInfo,
+        getShareTerminalWsUrl,
+        sendRelayMessage,
+        cleanup,
+    };
+}
+
+// --- Event callbacks (set by index.vue or other consumers) ---
+export let onShareClosed: (() => void) | null = null;
+export let onRelayTerminalCreate: ((msg: any) => void) | null = null;
+export let onRelayTerminalInput: ((msg: any) => void) | null = null;
+export let onRelayTerminalResize: ((msg: any) => void) | null = null;

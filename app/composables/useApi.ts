@@ -51,6 +51,17 @@ export function useApi() {
     const webMode = isWebMode();
 
     function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+        // Guest mode: route through /api/share/* proxy
+        if (import.meta.client) {
+            const { isGuest, shareId, guestId } = useShare();
+            if (isGuest.value && shareId.value) {
+                const headers = new Headers(options.headers);
+                headers.set("X-Share-Session", shareId.value);
+                if (guestId.value) headers.set("X-Guest-Id", guestId.value);
+                return fetch(`/api/share${path}`, { ...options, headers });
+            }
+        }
+
         const useSSH = webMode || !!getStoredSSHTarget();
         const prefix = useSSH ? "/api/ssh" : "/api/local";
 
@@ -70,6 +81,13 @@ export function useApi() {
     function getWsUrl(): string {
         if (!import.meta.client) return "";
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+
+        // Guest/host in share mode: use shared terminal WS
+        const { isSharing } = useShare();
+        if (isSharing.value) {
+            return `${protocol}//${window.location.host}/_share-terminal`;
+        }
+
         const useSSH = webMode || !!getStoredSSHTarget();
         const endpoint = useSSH ? "_ssh-terminal" : "_terminal";
         return `${protocol}//${window.location.host}/${endpoint}`;

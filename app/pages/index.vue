@@ -45,6 +45,11 @@
                     <button @click="saveActivePane" class="btn"
                         :class="{ 'btn-press': savePressing, 'btn-success': saveSuccess }"
                         :disabled="!activePane?.filePath">Save</button>
+                    <button @click="showShare = true" class="btn share-btn"
+                        :class="{ 'btn-sharing': isSharing }"
+                        :title="isSharing ? 'Sharing active' : 'Share session'">
+                        {{ isSharing ? 'Sharing' : 'Share' }}
+                    </button>
                     <button @click="showSettings = true" class="btn settings-btn"
                         :class="{ 'btn-remote': isRemote }"
                         title="Settings — remote backend">⚙</button>
@@ -81,6 +86,29 @@
             @saved="isRemote = getMode() !== 'local'"
             @connected="onSSHConnected"
             @disconnected="onSSHDisconnected" />
+
+        <ShareModal :show="showShare"
+            :rootPath="rootPath"
+            :backendMode="getMode()"
+            :hostSessionId="getSessionId()"
+            @close="showShare = false"
+            @joined="onShareJoined"
+            @left="onShareLeft"
+            @stopped="onShareStopped" />
+
+        <!-- Presence bar (visible when sharing) -->
+        <Transition name="presence-fade">
+            <div v-if="isSharing" class="presence-bar">
+                <span class="presence-dot" />
+                <span class="presence-text">
+                    {{ shareHostName }}{{ isGuest ? ' (host)' : ' (you)' }}
+                    <template v-for="g in shareGuests" :key="g.id">
+                        <span class="presence-sep">&middot;</span>
+                        {{ g.name }}
+                    </template>
+                </span>
+            </div>
+        </Transition>
     </div>
 </template>
 
@@ -390,7 +418,7 @@ import { useLocodeConfig } from '~/composables/useLocodeConfig';
 import type { LocodeConfig } from '~/composables/useLocodeConfig';
 
 const { loadConfig, saveConfig } = useLocodeConfig();
-const { apiFetch, getMode, isWebMode } = useApi();
+const { apiFetch, getMode, isWebMode, getSessionId } = useApi();
 
 function emptyPane(id: string): EditorPane {
     return { id, filePath: "", code: "", savedCode: "", language: "" };
@@ -412,7 +440,11 @@ function toAbsolute(relOrAbs: string, root: string): string {
 }
 
 const showSettings = ref(false);
+const showShare = ref(false);
 const isRemote = import.meta.client ? ref(getMode() !== "local") : ref(false);
+
+// --- Share state ---
+const { isSharing, isGuest, isHost, allowTerminal: shareAllowTerminal, guests: shareGuests, hostName: shareHostName } = useShare();
 
 // Electron IPC bridge for multi-window session tracking (injected by preload.cjs)
 const electronSession = import.meta.client
@@ -524,6 +556,37 @@ function onSSHConnected() {
 function onSSHDisconnected() {
     resetToFolderSelector();
     fileExplorerRef.value?.reset();
+}
+
+// --- Share lifecycle ---
+function onShareJoined(shareRootPath: string) {
+    // Guest joined: set rootPath to the host's shared root
+    fileCache.clear();
+    rootPath.value = shareRootPath;
+    panes.value = [emptyPane("main")];
+    activePaneId.value = "main";
+    showShare.value = false;
+}
+
+function onShareLeft() {
+    // Guest left: reset to folder selector
+    resetToFolderSelector();
+}
+
+function onShareStopped() {
+    // Host stopped sharing: no rootPath change, just close modal
+}
+
+// Register callback for when host closes share (guest gets kicked)
+import { onShareClosed as _onShareClosedSetter } from '~/composables/useShare';
+if (import.meta.client) {
+    // Use a module-level assignment to set the callback
+    (async () => {
+        const mod = await import('~/composables/useShare');
+        mod.onShareClosed = () => {
+            resetToFolderSelector();
+        };
+    })();
 }
 
 const editorAreaRef = ref<{ splitRatio: number; focusPane: (id: string) => void } | null>(null);
