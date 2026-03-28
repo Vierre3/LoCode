@@ -259,11 +259,6 @@
     color: rgba(100, 220, 100, 0.9) !important;
 }
 
-.share-btn {
-    font-size: 0.72rem;
-    padding: 4px 10px;
-}
-
 .btn-sharing {
     border-color: rgba(100, 180, 255, 0.5) !important;
     color: rgba(100, 180, 255, 0.9) !important;
@@ -550,8 +545,9 @@ const { isSharing, isGuest, isHost, allowTerminal: shareAllowTerminal, guests: s
 const canUseTerminal = computed(() => !isGuest.value || shareAllowTerminal.value);
 
 // Web mode: show blurred overlay when not connected to SSH and not in a share session
+const sshConnected = ref(import.meta.client ? !!sessionStorage.getItem('locode:sshSessionId') : false);
 const showConnectOverlay = computed(() =>
-    isWebMode && !isRemote.value && !isSharing.value
+    isWebMode && !sshConnected.value && !isSharing.value
 );
 
 // Electron IPC bridge for multi-window session tracking (injected by preload.cjs)
@@ -658,11 +654,13 @@ function resetToFolderSelector() {
 }
 
 async function onSSHConnected() {
+    sshConnected.value = true;
     if (isHost.value) await useShare().closeShare();
     resetToFolderSelector();
 }
 
 async function onSSHDisconnected() {
+    sshConnected.value = false;
     if (isHost.value) await useShare().closeShare();
     resetToFolderSelector();
     fileExplorerRef.value?.reset();

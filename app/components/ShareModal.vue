@@ -10,7 +10,7 @@
                         <p class="dialog-title">Share Session</p>
 
                         <div class="field">
-                            <label class="field-label">Your Name</label>
+                            <label class="field-label">Your Name <span class="optional">(optional)</span></label>
                             <input v-model="hostNameInput" class="field-input" type="text"
                                 placeholder="Host" spellcheck="false" />
                         </div>
@@ -24,7 +24,7 @@
                         </div>
 
                         <div class="actions">
-                            <button class="btn btn-primary" @click="onCreateShare" :disabled="creating">
+                            <button class="btn btn-primary" @click="onCreateShare" :disabled="creating || !canStartSharing">
                                 {{ creating ? 'Creating...' : 'Start Sharing' }}
                             </button>
                             <button class="btn btn-secondary" @click="joinMode = true">Join a Session</button>
@@ -146,6 +146,12 @@ const creating = ref(false);
 const error = ref("");
 const shareUrl = ref("");
 const copied = ref(false);
+
+// Host needs SSH connected (web mode) or a folder selected to start sharing
+const canStartSharing = computed(() => {
+    // Must have a rootPath (folder selected) or an SSH session
+    return !!props.rootPath || !!props.hostSessionId;
+});
 
 const joinMode = ref(false);
 const joinLinkInput = ref("");
