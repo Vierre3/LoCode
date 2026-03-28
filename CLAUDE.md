@@ -11,9 +11,10 @@ L'objectif principal est la vitesse : chargement instantané, interactions fluid
 
 - **Frontend** : Nuxt 4 + Vue 3 + Monaco Editor (même moteur d'édition que VSCode)
 - **Backend local** : Nuxt server routes (`server/api/local/*`) pour les opérations fichier via Node.js fs
-- **Backend SSH** : Nuxt server routes (`server/api/ssh/*`) pour les opérations fichier via ssh2 SFTP
+- **Backend SSH** : Nuxt server routes (`server/api/ssh/*`) pour les opérations fichier via ssh2 SFTP, sessions multi-fenêtres isolées par UUID
 - **Style** : Design glassmorphism (blur + transparence) avec Tailwind CSS via @nuxt/ui
 - **Desktop** : Electron wrapper (`electron/main.cjs`) qui lance Nuxt en sous-processus
+- **Web** : Mode SSH-only déployable sur Railway/PaaS (sans node-pty ni accès local)
 
 ### Modes de fonctionnement
 
@@ -28,9 +29,17 @@ MODE SSH DISTANT
   Navigateur ──► Nuxt frontend
     ├─ /api/ssh/* ─────────────────► ssh2 SFTP (file ops sur machine distante)
     └─ /_ssh-terminal (WebSocket) ─► ssh2 shell channel (PTY distant)
+
+MODE WEB (LOCODE_MODE=web)
+  Navigateur ──► Nuxt frontend (Railway / PaaS)
+    ├─ /api/ssh/* uniquement ──────► ssh2 SFTP (pas d'accès local)
+    └─ /_ssh-terminal (WebSocket) ─► ssh2 shell channel
+    (node-pty exclu du bundle, /api/local/* désactivé)
 ```
 
-`useApi.ts` route automatiquement vers `/api/local/*` ou `/api/ssh/*` selon la config SSH dans `sessionStorage("locode:sshTarget")` (per-window). Le routage est transparent pour les composants.
+`useApi.ts` route automatiquement vers `/api/local/*` ou `/api/ssh/*` selon la config SSH dans `sessionStorage("locode:sshTarget")` (per-window). En mode web, SSH est forcé. Le routage est transparent pour les composants.
+
+Chaque connexion SSH est identifiée par un UUID de session (`sessionStorage("locode:sshSessionId")`), transmis via le header `X-SSH-Session` à chaque requête. Plusieurs fenêtres peuvent avoir des connexions SSH indépendantes simultanées.
 
 ## Structure du projet
 
@@ -50,7 +59,7 @@ app/                              # Frontend Nuxt
     TerminalPanel.vue             # Panel multi-terminaux avec sidebar et split
     SettingsModal.vue             # Modal paramètres (URL backend distant)
   composables/
-    useApi.ts                     # Fetch centralisé : route vers /api/local/* ou /api/ssh/* + WebSocket
+    useApi.ts                     # Fetch centralisé : route vers /api/local/* ou /api/ssh/* + WebSocket + session ID
     useLocodeConfig.ts            # Config workspace persistée (.LoCode file, cache mémoire)
   plugins/
     monaco.client.ts              # Initialisation des workers Monaco
@@ -62,13 +71,21 @@ app/                              # Frontend Nuxt
 server/
   api/local/                        # Routes API mode local (Node.js fs)
     read.get.ts, list.get.ts, write.post.ts, stat.get.ts, info.get.ts
-  api/ssh/                          # Routes API mode SSH (ssh2 SFTP)
+  api/ssh/                          # Routes API mode SSH (ssh2 SFTP, session-aware via X-SSH-Session header)
     read.get.ts, list.get.ts, write.post.ts, stat.get.ts, info.get.ts, connect.post.ts, disconnect.post.ts
+  utils/
+    ssh.ts                        # Gestion sessions SSH multi-fenêtres (Map<sessionId, SSHSession>), connexion/déconnexion/SFTP
+    session.ts                    # Extraction session ID depuis header X-SSH-Session
+  plugins/
+    ssh-cleanup.ts                # Cleanup terminaux SSH à la perte de connexion
   routes/
     _terminal.ts                  # WebSocket handler + node-pty (terminal local)
+    _ssh-terminal.ts              # WebSocket handler SSH (shell channel dédié par terminal)
 
 electron/
   main.cjs                        # Process principal Electron (spawn Nuxt, BrowserWindow, CLI installer)
+
+railway.toml                       # Config déploiement Railway (build web-only, start command)
 
 .github/
   workflows/
@@ -86,10 +103,14 @@ Les routes Nuxt server exposent les mêmes endpoints en mode local et SSH :
 | `/api/{local,ssh}/write` | POST | Écrit/sauvegarde un fichier | `{ path, content }` (body JSON) |
 | `/api/{local,ssh}/stat` | GET | Stats d'un fichier (mtime) | `path` (query) |
 | `/api/{local,ssh}/info` | GET | Info machine (home, user) | — |
+| `/api/ssh/connect` | POST | Connexion SSH (retourne sessionId) | `{ host, port, username, password? }` (body JSON) |
+| `/api/ssh/disconnect` | POST | Déconnexion SSH | header `X-SSH-Session` |
 | `/_terminal` | WebSocket | Shell PTY local (node-pty) | messages JSON (create/input/resize) |
-| `/_ssh-terminal` | WebSocket | Shell PTY distant (ssh2) | messages JSON (create/input/resize) |
+| `/_ssh-terminal` | WebSocket | Shell PTY distant (ssh2) | messages JSON (create/input/resize/sessionId) |
 
-`useApi().apiFetch(path)` route automatiquement vers `/api/local` ou `/api/ssh` selon la config.
+Toutes les routes SSH requièrent le header `X-SSH-Session` contenant l'UUID de session.
+
+`useApi().apiFetch(path)` route automatiquement vers `/api/local` ou `/api/ssh` selon la config et injecte le header `X-SSH-Session`.
 
 ## Commandes
 
@@ -114,11 +135,37 @@ npm run electron:build:win     # NSIS installer (Windows)
 
 Le serveur Nuxt gère tout (API locale + SSH + terminal) en mode dev.
 
+### Mode web (déploiement PaaS)
+
+Variable d'environnement `LOCODE_MODE=web` :
+- Désactive l'accès local (pas de `/api/local/*`, pas de `node-pty`)
+- SSH est le seul backend disponible — le SettingsModal force la connexion avant d'utiliser l'app
+- `node-pty` exclu du bundle Rollup (`nitro.rollupConfig.external`)
+- Le mode est exposé côté client via `runtimeConfig.public.mode`
+
+```bash
+# Build web-only
+LOCODE_MODE=web npm run build
+
+# Start
+node .output/server/index.mjs
+```
+
 ## Mode SSH distant — usage
 
 1. Dans LoCode settings (icône engrenage dans le header) : entrer les informations SSH (host, port, username)
 2. L'explorateur de fichiers et l'éditeur opèrent sur le filesystem distant via SFTP (ssh2)
 3. Le terminal spawn les shells distants via ssh2 shell channel (WebSocket `/_ssh-terminal`)
+
+## Déploiement Railway
+
+`railway.toml` configure le déploiement web-only sur Railway :
+- Build : `LOCODE_MODE=web npm run build`
+- Start : `node .output/server/index.mjs`
+- Health check : `/`
+- Restart policy : on failure (max 3 retries)
+
+L'instance Railway est un client SSH pur — elle ne stocke aucun fichier localement, tout passe par SFTP vers le serveur distant de l'utilisateur.
 
 ## CI / Releases
 
@@ -174,7 +221,8 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Error handling sur `loadFile()` et `saveFile()` : try-catch réseau, vérification `res.ok`, mutex anti-spam sur save
 - Gestion du `<head>` via `useHead()` de Nuxt (titre + viewport) au lieu de tags HTML bruts dans le template
 - Polices adaptatives mobile : tailles réduites sur mobile (file tree, file label, boutons, Monaco Editor 12px vs 15px desktop)
-- `"overrides": { "minimatch": ">=10.2.1" }` dans package.json — force la déduplication de toutes les copies imbriquées de minimatch vers la version safe (corrige 24 vulnérabilités npm audit)
+- `"overrides"` dans package.json : `minimatch` (>=10.2.1), `citty` (^0.2.1), `serialize-javascript` (>=7.0.3) — force les versions safe pour corriger les vulnérabilités npm audit
+- `"optionalDependencies": { "commander": "^13.1.0" }` — résout un conflit `npm ci` en CI (peer dep optionnel de `@nuxt/cli` absent du lockfile)
 
 ### Tooltip chemin fichier/dossier
 - Survol prolongé (600ms) d'un fichier ou dossier dans le worktree/browse affiche un tooltip flottant avec le chemin complet
@@ -214,7 +262,7 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - `Terminal.client.vue` : composant xterm.js avec FitAddon + WebLinksAddon
 - `TerminalPanel.vue` : panel multi-terminaux avec sidebar de sélection
 - `server/routes/_terminal.ts` : WebSocket handler avec `defineWebSocketHandler`, spawn node-pty, messages JSON (create/input/resize/output/exit)
-- `nuxt.config.ts` : `nitro.experimental.websocket: true` pour activer les WebSockets
+- `nuxt.config.ts` : `nitro.experimental.websocket: true` pour activer les WebSockets, `LOCODE_MODE` env var pour le mode web/desktop, `runtimeConfig.public.mode` exposé au client, `nitro.rollupConfig.external` conditionnel (exclut `node-pty` en mode web)
 - Toggle terminal via clic logo ou raccourci `Ctrl+J` / `Cmd+J` avec gestion du focus (ouverture → focus terminal, fermeture → focus éditeur actif)
 - Fonctions `openTerminal()` / `closeTerminal()` dédiées pour éviter les race conditions (nextTick chaîné)
 - `Ctrl+J` et `Ctrl+S` passent au travers de xterm via `attachCustomKeyEventHandler` (bubble au window handler)
@@ -297,14 +345,21 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Optimisations taille de l'app (réduction du bundle)
 
 ### Mode SSH distant
-- `app/composables/useApi.ts` : composable centralisé `useApi()` exposant `apiFetch(path)` (route vers `/api/local/*` ou `/api/ssh/*` selon config), `getWsUrl()` (retourne `/_terminal` ou `/_ssh-terminal`), `getMode()` (retourne `"local"` ou `"ssh"`)
+- `app/composables/useApi.ts` : composable centralisé `useApi()` exposant `apiFetch(path)` (route vers `/api/local/*` ou `/api/ssh/*` selon config), `getWsUrl()` (retourne `/_terminal` ou `/_ssh-terminal`), `getMode()` (retourne `"local"` ou `"ssh"`), `isWebMode` (booléen), `getSessionId()` (UUID session SSH)
+- `setSessionId(id)` / `clearSessionId()` : gestion du session ID dans `sessionStorage("locode:sshSessionId")`
 - **Isolation per-window** : état SSH actif stocké dans `sessionStorage("locode:sshTarget")` (propre à chaque fenêtre Electron), credentials mémorisés dans `localStorage("locode:sshCreds")` (partagés). Ouvrir une nouvelle fenêtre = mode local par défaut, indépendamment des autres fenêtres connectées en SSH
-- `app/components/SettingsModal.vue` : modal glassmorphism avec champs SSH (host, port, username). À l'ouverture, charge depuis `sessionStorage` (connexion active) puis fallback `localStorage` (credentials sauvegardés). Connexion écrit dans les deux, déconnexion ne supprime que `sessionStorage`
+- **Multi-session backend** : `server/utils/ssh.ts` gère un `Map<sessionId, SSHSession>` — chaque fenêtre/onglet a sa propre connexion SSH identifiée par UUID. Toutes les routes SSH extraient le session ID via `server/utils/session.ts` (`getSessionId(event)` → header `X-SSH-Session`)
+- **Authentification SSH** : password, clé privée auto-détectée (`~/.ssh/id_ed25519`, `id_rsa`, `id_ecdsa`), SSH agent (`SSH_AUTH_SOCK`), keyboard-interactive
+- **Terminaux SSH dédiés** : chaque terminal crée sa propre connexion SSH (`createTerminalConnection()`) pour éviter le multiplexage sur un seul channel. MOTD/banners masqués via muting jusqu'au `clear` initial
+- **Cleanup automatique** : `server/plugins/ssh-cleanup.ts` écoute les pertes de connexion SSH et nettoie les terminaux associés via `cleanupSessionChannels(sessionId)`
+- `app/components/SettingsModal.vue` : modal glassmorphism avec champs SSH (host, port, username). À l'ouverture, charge depuis `sessionStorage` (connexion active) puis fallback `localStorage` (credentials sauvegardés). Connexion écrit dans les deux, déconnexion ne supprime que `sessionStorage`. En mode web, le bouton fermer est masqué tant que la connexion n'est pas établie
 - `server/api/ssh/*` : routes SFTP via ssh2 (read, write, list, stat, info, connect, disconnect)
-- `server/routes/_ssh-terminal.ts` : WebSocket handler pour shell distant via ssh2 shell channel
-- `Terminal.client.vue` : connexion WebSocket via `useApi().getWsUrl()` (local ou distant selon config)
+- `server/routes/_ssh-terminal.ts` : WebSocket handler pour shell distant via ssh2 shell channel — une connexion SSH dédiée par terminal, cleanup automatique à la déconnexion
+- `server/api/ssh/info.get.ts` : endpoint status SSH sans session ID requis (retourne `{ connected, reconnecting, host, home }`)
+- `Terminal.client.vue` : connexion WebSocket via `useApi().getWsUrl()` (local ou distant selon config), reconnexion automatique après 5s en cas de perte
 - Icône engrenage dans le header de `index.vue` avec indicateur visuel `.btn-remote` quand un backend distant est actif
 - Cache fichier vidé à la connexion/déconnexion SSH (changement de filesystem)
+- Worktree reset à la déconnexion SSH pour éviter l'état stale
 
 ### Cache fichier en mémoire
 - `fileCache` (`Map<string, CachedFile>`) : cache in-memory des fichiers ouverts, clé = chemin absolu, valeur = `{ code, language }`
