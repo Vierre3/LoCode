@@ -221,16 +221,6 @@ function copyLink() {
     setTimeout(() => copied.value = false, 1500);
 }
 
-// Auto-detect ?share= in URL on mount
-onMounted(() => {
-    if (!import.meta.client) return;
-    const params = new URLSearchParams(window.location.search);
-    const sid = params.get("share");
-    if (sid && !isSharing.value) {
-        joinLinkInput.value = sid;
-        joinMode.value = true;
-    }
-});
 </script>
 
 <style lang="css" scoped>

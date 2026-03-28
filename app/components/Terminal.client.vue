@@ -25,6 +25,7 @@ const props = defineProps<{
 }>();
 
 const { getWsUrl, getMode, getSessionId } = useApi();
+const { isSharing, shareId: shareSessionId, guestId: shareGuestId } = useShare();
 
 const termContainer = ref<HTMLDivElement | null>(null);
 let term: Terminal | null = null;
@@ -58,24 +59,46 @@ function doFit() {
     }
 }
 
+// Track the server-assigned terminal ID for shared terminals
+let sharedTerminalId: string | null = null;
+
 function connectWs() {
     if (disposed || !term) return;
     ws = new WebSocket(getWsUrl());
 
     ws.onopen = () => {
-        ws!.send(JSON.stringify({
-            type: "create",
-            cwd: props.cwd || undefined,
-            cols: term!.cols,
-            rows: term!.rows,
-            sessionId: getSessionId(),
-        }));
+        if (isSharing.value && shareSessionId.value) {
+            // Share mode: send auth first, then create after auth-ok
+            ws!.send(JSON.stringify({
+                type: "auth",
+                shareId: shareSessionId.value,
+                guestId: shareGuestId.value || undefined,
+            }));
+        } else {
+            ws!.send(JSON.stringify({
+                type: "create",
+                cwd: props.cwd || undefined,
+                cols: term!.cols,
+                rows: term!.rows,
+                sessionId: getSessionId(),
+            }));
+        }
     };
 
     ws.onmessage = (event) => {
         try {
             const msg = JSON.parse(event.data);
-            if (msg.type === "output" && term) {
+            if (msg.type === "auth-ok" && isSharing.value) {
+                // Auth succeeded — now create the shared terminal
+                ws!.send(JSON.stringify({
+                    type: "create",
+                    cwd: props.cwd || undefined,
+                    cols: term!.cols,
+                    rows: term!.rows,
+                }));
+            } else if (msg.type === "terminal-ready") {
+                sharedTerminalId = msg.terminalId;
+            } else if (msg.type === "output" && term) {
                 term.write(msg.data);
             } else if (msg.type === "exit" && term) {
                 term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
@@ -178,7 +201,11 @@ onMounted(async () => {
 
         term.onData((data) => {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "input", data }));
+                if (sharedTerminalId) {
+                    ws.send(JSON.stringify({ type: "input", terminalId: sharedTerminalId, data }));
+                } else {
+                    ws.send(JSON.stringify({ type: "input", data }));
+                }
             }
         });
     }
@@ -207,7 +234,11 @@ onMounted(async () => {
         if (useLocalPty) {
             electronTerminal!.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+            if (sharedTerminalId) {
+                ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
+            } else {
+                ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+            }
         }
     });
     resizeObserver.observe(termContainer.value);

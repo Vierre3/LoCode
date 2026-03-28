@@ -53,7 +53,7 @@
                     <button @click="showSettings = true" class="btn settings-btn"
                         :class="{ 'btn-remote': isRemote }"
                         title="Settings — remote backend">⚙</button>
-                    <img src="/logo.svg" alt="LoCode" class="logo logo-btn" :class="{ active: terminalOpen }"
+                    <img v-if="canUseTerminal" src="/logo.svg" alt="LoCode" class="logo logo-btn" :class="{ active: terminalOpen }"
                         @click="terminalOpen ? closeTerminal() : openTerminal()" />
                 </div>
             </div>
@@ -66,7 +66,7 @@
                         @drop="onEditorDrop" @close-pane="onClosePane"
                         @update:splitRatio="onUpdateSplitRatio" />
                 </div>
-                <TerminalPanel ref="terminalPanelRef" v-show="terminalOpen"
+                <TerminalPanel ref="terminalPanelRef" v-show="terminalOpen && canUseTerminal"
                     :rootPath="rootPath" :isMobile="isMobile" :initialTerminalHeight="cfgTerminalHeight"
                     @update:sessionCount="terminalSessionCount = $event"
                     @update:splitIndex="terminalSplitIndex = $event"
@@ -95,6 +95,15 @@
             @joined="onShareJoined"
             @left="onShareLeft"
             @stopped="onShareStopped" />
+
+        <!-- Web mode: connect overlay (blurs content but keeps header actions clickable) -->
+        <Transition name="overlay-fade">
+            <div v-if="showConnectOverlay" class="connect-overlay">
+                <div class="connect-overlay-msg">
+                    Connect via SSH or join a shared session to start editing
+                </div>
+            </div>
+        </Transition>
 
         <!-- Presence bar (visible when sharing) -->
         <Transition name="presence-fade">
@@ -250,6 +259,95 @@
     color: rgba(100, 220, 100, 0.9) !important;
 }
 
+.share-btn {
+    font-size: 0.72rem;
+    padding: 4px 10px;
+}
+
+.btn-sharing {
+    border-color: rgba(100, 180, 255, 0.5) !important;
+    color: rgba(100, 180, 255, 0.9) !important;
+    background: rgba(100, 180, 255, 0.1) !important;
+}
+
+.presence-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 12px;
+    background: rgba(30, 30, 30, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.presence-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(80, 200, 120, 0.9);
+    flex-shrink: 0;
+}
+
+.presence-sep {
+    margin: 0 2px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.presence-fade-enter-active,
+.presence-fade-leave-active {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.presence-fade-enter-from,
+.presence-fade-leave-to {
+    opacity: 0;
+    transform: translateY(100%);
+}
+
+/* --- Connect overlay (web mode, not connected) --- */
+.connect-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.connect-overlay-msg {
+    background: rgba(30, 30, 30, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    padding: 16px 28px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.88rem;
+    font-weight: 500;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.overlay-fade-enter-active,
+.overlay-fade-leave-active {
+    transition: opacity 0.35s ease;
+}
+.overlay-fade-enter-from,
+.overlay-fade-leave-to {
+    opacity: 0;
+}
+
 .logo {
     height: 40px;
     width: 40px;
@@ -285,6 +383,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    z-index: 55;
+    pointer-events: auto;
 }
 
 .file-labels {
@@ -446,6 +546,14 @@ const isRemote = import.meta.client ? ref(getMode() !== "local") : ref(false);
 // --- Share state ---
 const { isSharing, isGuest, isHost, allowTerminal: shareAllowTerminal, guests: shareGuests, hostName: shareHostName } = useShare();
 
+// Guests can only use terminal when host allows it; hosts and non-share users always can
+const canUseTerminal = computed(() => !isGuest.value || shareAllowTerminal.value);
+
+// Web mode: show blurred overlay when not connected to SSH and not in a share session
+const showConnectOverlay = computed(() =>
+    isWebMode && !isRemote.value && !isSharing.value
+);
+
 // Electron IPC bridge for multi-window session tracking (injected by preload.cjs)
 const electronSession = import.meta.client
     ? (window as any).electronSession as { getInitialRoot: () => string; setRoot: (path: string) => void } | undefined
@@ -549,11 +657,13 @@ function resetToFolderSelector() {
     }
 }
 
-function onSSHConnected() {
+async function onSSHConnected() {
+    if (isHost.value) await useShare().closeShare();
     resetToFolderSelector();
 }
 
-function onSSHDisconnected() {
+async function onSSHDisconnected() {
+    if (isHost.value) await useShare().closeShare();
     resetToFolderSelector();
     fileExplorerRef.value?.reset();
 }
@@ -575,6 +685,20 @@ function onShareLeft() {
 
 function onShareStopped() {
     // Host stopped sharing: no rootPath change, just close modal
+}
+
+async function autoJoinShare(sid: string) {
+    try {
+        await useShare().joinShare(sid);
+        onShareJoined(useShare().shareRootPath.value);
+        // Clean ?share= from URL without reload
+        const url = new URL(window.location.href);
+        url.searchParams.delete("share");
+        window.history.replaceState({}, "", url.toString());
+    } catch {
+        // Share not found or expired — open modal so user can try manually
+        showShare.value = true;
+    }
 }
 
 // Register callback for when host closes share (guest gets kicked)
@@ -679,9 +803,10 @@ onMounted(async () => {
     }
     startReloadPolling();
 
-    // In web mode, auto-open settings if no SSH connection in this tab
-    if (isWebMode && !sessionStorage.getItem('locode:sshTarget')) {
-        showSettings.value = true;
+    // Auto-join share if ?share= is in the URL
+    const urlShareId = new URLSearchParams(window.location.search).get("share");
+    if (urlShareId && !isSharing.value) {
+        autoJoinShare(urlShareId);
     }
 });
 
@@ -783,6 +908,7 @@ async function restoreWorkspace(_path: string, config: LocodeConfig) {
 
 // --- File selection ---
 async function onSelectRoot(path: string) {
+    if (isHost.value) await useShare().closeShare();
     saveWorkspaceConfig();
     fileCache.clear();
     const config = await loadConfig(path);

@@ -1,10 +1,10 @@
 <template>
     <Teleport to="body">
         <Transition name="modal">
-            <div v-if="show" class="dialog-backdrop" @click="(!isWebMode || connected) && $emit('close')">
+            <div v-if="show" class="dialog-backdrop" @click="$emit('close')">
                 <div class="dialog" @click.stop>
-                    <button v-if="!isWebMode || connected" class="dialog-close" @click="$emit('close')">&times;</button>
-                    <p class="dialog-title">{{ isWebMode && !connected ? 'Connect to a remote server' : 'Settings' }}</p>
+                    <button class="dialog-close" @click="$emit('close')">&times;</button>
+                    <p class="dialog-title">Settings</p>
 
                     <!-- SSH Connection -->
                     <div class="section">

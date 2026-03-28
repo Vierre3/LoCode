@@ -1,6 +1,6 @@
 <template>
     <div class="h-full navbar flex flex-col">
-        <button class="browse-btn" @click="toggleBrowse">
+        <button v-if="!shareGuest" class="browse-btn" @click="toggleBrowse">
             {{ browsing ? 'Select Folder' : 'Open Folder' }}
         </button>
         <div class="overflow-y-auto overflow-x-hidden flex-1 p-1">
@@ -91,6 +91,7 @@
 
 <script setup lang="ts">
 const { apiFetch, isWebMode } = useApi()
+const { isGuest: shareGuest } = useShare()
 
 const props = defineProps<{
     openFiles: string[];
