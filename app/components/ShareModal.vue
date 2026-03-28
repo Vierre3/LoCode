@@ -91,16 +91,16 @@
                         <p class="dialog-title">Join a Session</p>
 
                         <div class="field">
-                            <label class="field-label">Share Link or ID</label>
-                            <input v-model="joinLinkInput" class="field-input" type="text"
-                                placeholder="Paste the share link..." spellcheck="false"
+                            <label class="field-label">Your Name <span class="optional">(optional)</span></label>
+                            <input v-model="joinNameInput" class="field-input" type="text"
+                                placeholder="Guest" spellcheck="false"
                                 @keydown.enter="onJoin" />
                         </div>
 
                         <div class="field">
-                            <label class="field-label">Your Name <span class="optional">(optional)</span></label>
-                            <input v-model="joinNameInput" class="field-input" type="text"
-                                placeholder="Guest" spellcheck="false"
+                            <label class="field-label">Share Link or ID</label>
+                            <input v-model="joinLinkInput" class="field-input" type="text"
+                                placeholder="Paste the share link..." spellcheck="false"
                                 @keydown.enter="onJoin" />
                         </div>
 
@@ -140,16 +140,18 @@ const {
     createShare, joinShare, closeShare, leaveShare, updateSettings,
 } = useShare();
 
-const hostNameInput = ref("Host");
+const { isWebMode } = useApi();
+const { public: { shareUrl: configShareUrl } } = useRuntimeConfig();
+
+const hostNameInput = ref("");
 const allowTerminalInput = ref(true);
 const creating = ref(false);
 const error = ref("");
 const shareUrl = ref("");
 const copied = ref(false);
 
-// Host needs SSH connected (web mode) or a folder selected to start sharing
+// Host needs rootPath or SSH session to start sharing
 const canStartSharing = computed(() => {
-    // Must have a rootPath (folder selected) or an SSH session
     return !!props.rootPath || !!props.hostSessionId;
 });
 
@@ -173,14 +175,20 @@ async function onCreateShare() {
     error.value = "";
     creating.value = true;
     try {
+        // In desktop mode, use the configured share server URL (from RAILWAY_PUBLIC_DOMAIN or LOCODE_SHARE_URL)
+        const serverUrl = isWebMode ? undefined : (configShareUrl as string || undefined);
+
         const result = await createShare({
             rootPath: props.rootPath,
             backendMode: props.backendMode,
             hostSessionId: props.hostSessionId,
             allowTerminal: allowTerminalInput.value,
             hostName: hostNameInput.value.trim() || "Host",
+            serverUrl,
         });
         shareUrl.value = result.shareUrl;
+        // Auto-copy link to clipboard
+        try { await navigator.clipboard.writeText(result.shareUrl); copied.value = true; setTimeout(() => copied.value = false, 1500); } catch {}
     } catch (err: any) {
         error.value = err.message || "Failed to create share";
     } finally {

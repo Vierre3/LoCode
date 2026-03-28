@@ -27,6 +27,8 @@ const connected = ref(false);
 let controlWs: WebSocket | null = null;
 // Relay WebSocket (desktop host only — forwards guest requests)
 let relayWs: WebSocket | null = null;
+// Remote server URL (desktop host sharing via Railway)
+let remoteServerUrl: string | null = null;
 
 export function useShare() {
     const isHost = computed(() => role.value === "host");
@@ -40,11 +42,20 @@ export function useShare() {
         hostSessionId?: string;
         allowTerminal: boolean;
         hostName: string;
+        serverUrl?: string; // Remote server URL for desktop hosts (e.g. Railway)
     }): Promise<{ shareId: string; shareUrl: string }> {
-        const res = await fetch("/api/share/create", {
+        // Desktop host → create on remote server; web host → create locally
+        const baseUrl = opts.serverUrl || "";
+        const res = await fetch(`${baseUrl}/api/share/create`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(opts),
+            body: JSON.stringify({
+                rootPath: opts.rootPath,
+                backendMode: opts.backendMode,
+                hostSessionId: opts.serverUrl ? undefined : opts.hostSessionId, // no SSH session on remote
+                allowTerminal: opts.allowTerminal,
+                hostName: opts.hostName,
+            }),
         });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
@@ -56,11 +67,12 @@ export function useShare() {
         rootPath.value = opts.rootPath;
         guests.value = [];
         connected.value = true;
+        remoteServerUrl = opts.serverUrl || null;
 
         connectControlWs(data.shareId, "host", "host");
 
-        // If relay mode (no hostSessionId → desktop host), connect relay WS
-        if (!opts.hostSessionId) {
+        // Desktop host always uses relay mode (SSH stays local)
+        if (opts.serverUrl) {
             connectRelayWs(data.shareId);
         }
 
@@ -89,11 +101,16 @@ export function useShare() {
         connectControlWs(id, "guest", data.guestId);
     }
 
+    // --- API base URL (remote server for desktop host, local for web) ---
+    function apiBase(): string {
+        return remoteServerUrl || "";
+    }
+
     // --- Host: close share ---
     async function closeShare(): Promise<void> {
         if (!shareId.value) return;
         try {
-            await fetch("/api/share/close", {
+            await fetch(`${apiBase()}/api/share/close`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ shareId: shareId.value }),
@@ -106,7 +123,7 @@ export function useShare() {
     async function leaveShare(): Promise<void> {
         if (!shareId.value || !guestId.value) return;
         try {
-            await fetch("/api/share/leave", {
+            await fetch(`${apiBase()}/api/share/leave`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ shareId: shareId.value, guestId: guestId.value }),
@@ -118,7 +135,7 @@ export function useShare() {
     // --- Host: update settings ---
     async function updateSettings(settings: { allowTerminal?: boolean }): Promise<void> {
         if (!shareId.value) return;
-        await fetch("/api/share/settings", {
+        await fetch(`${apiBase()}/api/share/settings`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ shareId: shareId.value, ...settings }),
@@ -132,7 +149,7 @@ export function useShare() {
     async function refreshInfo(): Promise<void> {
         if (!shareId.value) return;
         try {
-            const res = await fetch(`/api/share/info?shareId=${shareId.value}`);
+            const res = await fetch(`${apiBase()}/api/share/info?shareId=${shareId.value}`);
             if (!res.ok) return;
             const data = await res.json();
             guests.value = data.guests || [];
@@ -140,11 +157,20 @@ export function useShare() {
         } catch {}
     }
 
+    // --- WebSocket URL helper ---
+    function wsBase(): string {
+        if (remoteServerUrl) {
+            // Convert https://host → wss://host, http://host → ws://host
+            return remoteServerUrl.replace(/^http/, "ws");
+        }
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${protocol}//${window.location.host}`;
+    }
+
     // --- Control WebSocket ---
     function connectControlWs(sid: string, r: "host" | "guest", userId: string) {
         if (!import.meta.client) return;
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const url = `${protocol}//${window.location.host}/_share`;
+        const url = `${wsBase()}/_share`;
         controlWs = new WebSocket(url);
 
         controlWs.onopen = () => {
@@ -193,8 +219,7 @@ export function useShare() {
     // --- Relay WebSocket (desktop host only) ---
     function connectRelayWs(sid: string) {
         if (!import.meta.client) return;
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const url = `${protocol}//${window.location.host}/_share-relay`;
+        const url = `${wsBase()}/_share-relay`;
         relayWs = new WebSocket(url);
 
         relayWs.onopen = () => {
@@ -267,8 +292,7 @@ export function useShare() {
     // --- Shared terminal WebSocket URL ---
     function getShareTerminalWsUrl(): string {
         if (!import.meta.client) return "";
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        return `${protocol}//${window.location.host}/_share-terminal`;
+        return `${wsBase()}/_share-terminal`;
     }
 
     // --- Cleanup ---
@@ -284,6 +308,7 @@ export function useShare() {
 
         if (controlWs) { controlWs.close(); controlWs = null; }
         if (relayWs) { relayWs.close(); relayWs = null; }
+        remoteServerUrl = null;
     }
 
     return {
