@@ -47,8 +47,8 @@
                         :disabled="!activePane?.filePath">Save</button>
                     <button @click="showShare = true" class="btn share-btn"
                         :class="{ 'btn-sharing': isSharing }"
-                        :title="isSharing ? 'Sharing active' : 'Share session'">
-                        {{ isSharing ? 'Sharing' : 'Share' }}
+                        :title="isSharing ? (isGuest ? 'Connected to session' : 'Sharing active') : 'Share session'">
+                        {{ isSharing ? (isGuest ? 'Session' : 'Sharing') : 'Share' }}
                     </button>
                     <button @click="showSettings = true" class="btn settings-btn"
                         :class="{ 'btn-remote': isRemote }"
@@ -105,19 +105,6 @@
             </div>
         </Transition>
 
-        <!-- Presence bar (visible when sharing) -->
-        <Transition name="presence-fade">
-            <div v-if="isSharing" class="presence-bar">
-                <span class="presence-dot" />
-                <span class="presence-text">
-                    {{ shareHostName }}{{ isGuest ? ' (host)' : ' (you)' }}
-                    <template v-for="g in shareGuests" :key="g.id">
-                        <span class="presence-sep">&middot;</span>
-                        {{ g.name }}
-                    </template>
-                </span>
-            </div>
-        </Transition>
     </div>
 </template>
 
@@ -263,47 +250,6 @@
     border-color: rgba(100, 180, 255, 0.5) !important;
     color: rgba(100, 180, 255, 0.9) !important;
     background: rgba(100, 180, 255, 0.1) !important;
-}
-
-.presence-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 90;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 12px;
-    background: rgba(30, 30, 30, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    font-size: 0.72rem;
-    color: rgba(255, 255, 255, 0.65);
-}
-
-.presence-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: rgba(80, 200, 120, 0.9);
-    flex-shrink: 0;
-}
-
-.presence-sep {
-    margin: 0 2px;
-    color: rgba(255, 255, 255, 0.3);
-}
-
-.presence-fade-enter-active,
-.presence-fade-leave-active {
-    transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.presence-fade-enter-from,
-.presence-fade-leave-to {
-    opacity: 0;
-    transform: translateY(100%);
 }
 
 /* --- Connect overlay (web mode, not connected) --- */
@@ -539,7 +485,7 @@ const showShare = ref(false);
 const isRemote = import.meta.client ? ref(getMode() !== "local") : ref(false);
 
 // --- Share state ---
-const { isSharing, isGuest, isHost, allowTerminal: shareAllowTerminal, guests: shareGuests, hostName: shareHostName } = useShare();
+const { isSharing, isGuest, isHost, allowTerminal: shareAllowTerminal } = useShare();
 
 // Guests can only use terminal when host allows it; hosts and non-share users always can
 const canUseTerminal = computed(() => !isGuest.value || shareAllowTerminal.value);
@@ -789,6 +735,15 @@ onMounted(async () => {
         .forEach(k => localStorage.removeItem(k));
     ["locode:sidebarWidth", "locode:splitRatio", "locode:terminalHeight", "locode:currentFile", "locode:sshTarget"].forEach(k => localStorage.removeItem(k));
 
+    // Auto-join share if ?share= is in the URL — must run BEFORE normal workspace restore
+    // to avoid hitting SSH/local APIs without a valid session
+    const urlShareId = new URLSearchParams(window.location.search).get("share");
+    if (urlShareId && !isSharing.value) {
+        await autoJoinShare(urlShareId);
+        startReloadPolling();
+        return; // skip normal workspace restore — share sets its own rootPath
+    }
+
     if (rootPath.value) {
         // Sync rootPath to Electron session tracking (covers localStorage-restored roots)
         electronSession?.setRoot(rootPath.value);
@@ -800,12 +755,6 @@ onMounted(async () => {
         await restoreWorkspace(rootPath.value, config);
     }
     startReloadPolling();
-
-    // Auto-join share if ?share= is in the URL
-    const urlShareId = new URLSearchParams(window.location.search).get("share");
-    if (urlShareId && !isSharing.value) {
-        autoJoinShare(urlShareId);
-    }
 });
 
 onBeforeUnmount(() => {

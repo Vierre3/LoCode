@@ -48,8 +48,8 @@
                         <div class="section">
                             <p class="section-label">Connected Users ({{ guests.length + 1 }})</p>
                             <ul class="guest-list">
-                                <li class="guest-item host">{{ hostName }} (you)</li>
-                                <li v-for="g in guests" :key="g.id" class="guest-item">{{ g.name }}</li>
+                                <li class="guest-item host"><span class="user-dot" /> {{ hostName }} (you)</li>
+                                <li v-for="g in guests" :key="g.id" class="guest-item"><span class="user-dot" /> {{ g.name }}</li>
                             </ul>
                         </div>
 
@@ -74,10 +74,10 @@
                         <div class="section">
                             <p class="section-label">Connected Users ({{ guests.length + 1 }})</p>
                             <ul class="guest-list">
-                                <li class="guest-item host">{{ hostName }} (host)</li>
+                                <li class="guest-item host"><span class="user-dot" /> {{ hostName }} (host)</li>
                                 <li v-for="g in guests" :key="g.id" class="guest-item"
                                     :class="{ you: g.id === guestId }">
-                                    {{ g.name }}{{ g.id === guestId ? ' (you)' : '' }}
+                                    <span class="user-dot" /> {{ g.name }}{{ g.id === guestId ? ' (you)' : '' }}
                                 </li>
                             </ul>
                         </div>
@@ -99,9 +99,9 @@
                         </div>
 
                         <div class="field">
-                            <label class="field-label">Share Link or ID</label>
+                            <label class="field-label">Share Link</label>
                             <input v-model="joinLinkInput" class="field-input" type="text"
-                                placeholder="Paste the share link..." spellcheck="false"
+                                placeholder="https://locode.example.com?share=..." spellcheck="false"
                                 @keydown.enter="onJoin" />
                         </div>
 
@@ -423,6 +423,9 @@ function copyLink() {
     font-size: 0.82rem;
     color: rgba(255, 255, 255, 0.7);
     border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 .guest-item.host {
     color: rgba(255, 255, 255, 0.9);
@@ -430,6 +433,14 @@ function copyLink() {
 }
 .guest-item.you {
     color: rgba(100, 180, 255, 0.9);
+}
+.user-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(110, 231, 183, 0.9);
+    flex-shrink: 0;
+    box-shadow: 0 0 4px rgba(110, 231, 183, 0.4);
 }
 
 .share-actions {
@@ -522,6 +533,8 @@ function copyLink() {
     background: rgba(110, 231, 183, 0.2);
     color: rgba(110, 231, 183, 0.9);
     border-color: rgba(110, 231, 183, 0.4);
+    transform: translateZ(0) scale(0.93);
+    box-shadow: 0 0 12px rgba(110, 231, 183, 0.25);
 }
 
 /* Transition — same as SettingsModal */

@@ -131,7 +131,12 @@ provide("hideTooltip", () => {
 
 async function fetchList(path: string, dirsOnly = false): Promise<any[]> {
     const res = await apiFetch("/list?path=" + encodeURIComponent(path));
+    if (!res.ok) {
+        console.warn("[FileExplorer] fetchList error:", res.status, await res.text().catch(() => ""));
+        return [];
+    }
     let items = await res.json();
+    if (!Array.isArray(items)) return [];
     if (dirsOnly) items = items.filter((n: any) => n.type === "dir");
     return items;
 }
