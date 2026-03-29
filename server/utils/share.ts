@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolve as resolvePath } from "node:path";
 import type { Peer } from "crossws";
 
 // --- Share session state ---
@@ -276,8 +277,7 @@ export function removeTerminal(terminalId: string): void {
 // --- Path security ---
 
 export function isPathWithinRoot(filePath: string, rootPath: string): boolean {
-    const { resolve } = require("node:path");
-    const resolved = resolve(filePath);
-    const root = resolve(rootPath);
+    const resolved = resolvePath(filePath);
+    const root = resolvePath(rootPath);
     return resolved === root || resolved.startsWith(root + "/") || resolved.startsWith(root + "\\");
 }

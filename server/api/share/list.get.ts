@@ -15,7 +15,12 @@ export default defineEventHandler(async (event) => {
     }
 
     if (session.mode === "relay") {
-        return await relayRequest(shareId, "list", { path });
+        try {
+            const result = await relayRequest(shareId, "list", { path });
+            return result;
+        } catch (err: any) {
+            throw createError({ statusCode: 502, statusMessage: `Relay error: ${err.message}` });
+        }
     }
 
     // Direct mode - SSH
