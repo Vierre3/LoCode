@@ -26,7 +26,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    shareCreated: [terminalId: string];
+    shareCreated: [terminalId: string, name: string];
 }>();
 
 const { getWsUrl, getMode, getSessionId } = useApi();
@@ -40,8 +40,8 @@ let resizeObserver: ResizeObserver | null = null;
 let ipcCleanups: (() => void)[] = [];
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let disposed = false;
-// Use local node-pty only in Electron + local mode; SSH mode always uses WebSocket
-const useLocalPty = !!electronTerminal && getMode() === "local";
+// Use local node-pty only in Electron + local mode (not in share mode — share always uses WebSocket)
+const useLocalPty = !!electronTerminal && getMode() === "local" && !isSharing.value;
 
 // Unique ID for this terminal instance (used for IPC routing)
 const termId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -114,7 +114,7 @@ function connectWs() {
             } else if (msg.type === "terminal-ready") {
                 sharedTerminalId = msg.terminalId;
                 if (!props.shareTerminalId) {
-                    emit("shareCreated", msg.terminalId);
+                    emit("shareCreated", msg.terminalId, msg.name ?? "");
                 }
             } else if (msg.type === "output" && term) {
                 term.write(msg.data);

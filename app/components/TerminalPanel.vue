@@ -36,7 +36,7 @@
                         :active="s.id === activeId || s.id === splitId"
                         :focused="s.id === focusedId"
                         :shareTerminalId="s.shareTerminalId"
-                        @shareCreated="terminalId => onShareCreated(s.id, terminalId)" />
+                        @shareCreated="(terminalId, name) => onShareCreated(s.id, terminalId, name)" />
                 </div>
             </div>
             <div v-if="!isMobile" class="terminal-sidebar">
@@ -174,13 +174,14 @@ function focusTerminal(id: string) {
     nextTick(() => termRefs[id]?.focus());
 }
 
-function onShareCreated(localId: string, serverTerminalId: string) {
+function onShareCreated(localId: string, serverTerminalId: string, serverName: string) {
     const s = sessions.value.find(s => s.id === localId);
     if (s) {
         s.shareTerminalId = serverTerminalId;
+        if (serverName) s.name = serverName;
         knownShareIds.add(serverTerminalId);
         // Add to sharedTerminals so terminal-removed can clean it up
-        addSharedTerminal(serverTerminalId, s.name);
+        addSharedTerminal(serverTerminalId, serverName || s.name);
     }
 }
 
