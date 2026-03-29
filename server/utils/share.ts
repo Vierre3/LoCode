@@ -21,6 +21,7 @@ export interface ShareSession {
     allowTerminal: boolean;
     hostName: string;
     guests: Map<string, GuestInfo>;
+    activeTerminals: Map<string, string>; // terminalId → name
     createdAt: number;
 }
 
@@ -58,6 +59,7 @@ export function createShare(opts: {
         allowTerminal: opts.allowTerminal,
         hostName: opts.hostName,
         guests: new Map(),
+        activeTerminals: new Map(),
         createdAt: Date.now(),
     };
     shares.set(id, session);
@@ -131,6 +133,20 @@ export function updateShareRootPath(shareId: string, rootPath: string): void {
     const session = shares.get(shareId);
     if (!session) return;
     session.rootPath = rootPath;
+}
+
+export function addActiveTerminal(shareId: string, terminalId: string, name: string): void {
+    const session = shares.get(shareId);
+    if (!session) return;
+    session.activeTerminals.set(terminalId, name);
+    broadcastControl(shareId, { type: "terminal-added", terminal: { id: terminalId, name } });
+}
+
+export function removeActiveTerminal(shareId: string, terminalId: string): void {
+    const session = shares.get(shareId);
+    if (!session) return;
+    session.activeTerminals.delete(terminalId);
+    broadcastControl(shareId, { type: "terminal-removed", terminalId });
 }
 
 export function getAllShares(): ShareSession[] {

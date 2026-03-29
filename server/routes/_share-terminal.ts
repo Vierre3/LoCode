@@ -1,5 +1,5 @@
 import { defineWebSocketHandler } from "h3";
-import { getShare, registerTerminalPeer, unregisterTerminalPeer, broadcastToTerminalPeers, removeTerminal } from "../utils/share";
+import { getShare, registerTerminalPeer, unregisterTerminalPeer, broadcastToTerminalPeers, removeTerminal, addActiveTerminal, removeActiveTerminal } from "../utils/share";
 import { createTerminalConnection } from "../utils/ssh";
 import type { Client } from "ssh2";
 
@@ -47,6 +47,7 @@ export default defineWebSocketHandler({
         if (data.type === "create") {
             if (!session.allowTerminal && auth.guestId) return; // guest without permission
             const terminalId = `st-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            const name = `Terminal ${session.activeTerminals.size + 1}`;
 
             // Subscribe the creator
             registerTerminalPeer(terminalId, peer);
@@ -67,14 +68,16 @@ export default defineWebSocketHandler({
                     cols: data.cols || 80,
                     rows: data.rows || 24,
                 }));
-                peer.send(JSON.stringify({ type: "terminal-ready", terminalId }));
+                addActiveTerminal(auth.shareId, terminalId, name);
+                peer.send(JSON.stringify({ type: "terminal-ready", terminalId, name }));
             } else {
                 // Direct mode: create SSH shell channel on this server
-                createDirectTerminal(auth.shareId, session, terminalId, data, peer);
+                createDirectTerminal(auth.shareId, session, terminalId, name, data, peer);
             }
         } else if (data.type === "subscribe") {
             const { terminalId } = data;
             if (typeof terminalId !== "string") return;
+            if (!session.activeTerminals.has(terminalId)) return; // validate terminal exists
             registerTerminalPeer(terminalId, peer);
             let subs = peerTerminals.get(peer.id);
             if (!subs) { subs = new Set(); peerTerminals.set(peer.id, subs); }
@@ -103,6 +106,21 @@ export default defineWebSocketHandler({
                     dt.stream.setWindow(rows, cols, rows * 16, cols * 8);
                 }
             }
+        } else if (data.type === "close") {
+            const { terminalId } = data;
+            if (typeof terminalId !== "string") return;
+
+            if (session.mode === "relay" && session.hostRelayPeer) {
+                session.hostRelayPeer.send(JSON.stringify({ type: "terminal-close", terminalId }));
+            } else {
+                const dt = directTerminals.get(terminalId);
+                if (dt && dt.stream) {
+                    dt.stream.end();
+                }
+            }
+            removeActiveTerminal(auth.shareId, terminalId);
+            broadcastToTerminalPeers(terminalId, { type: "exit", terminalId, code: 0 });
+            removeTerminal(terminalId);
         }
     },
 
@@ -121,7 +139,7 @@ function cleanupPeer(peer: any): void {
     peerAuth.delete(peer.id);
 }
 
-async function createDirectTerminal(shareId: string, session: any, terminalId: string, data: any, peer: any): Promise<void> {
+async function createDirectTerminal(shareId: string, session: any, terminalId: string, name: string, data: any, peer: any): Promise<void> {
     if (!session.hostSessionId) {
         peer.send(JSON.stringify({ type: "output", terminalId, data: "\r\n\x1b[31m[No SSH session]\x1b[0m\r\n" }));
         return;
@@ -137,6 +155,7 @@ async function createDirectTerminal(shareId: string, session: any, terminalId: s
             }
 
             directTerminals.set(terminalId, { shareId, sshConn: conn, stream });
+            addActiveTerminal(shareId, terminalId, name);
 
             // Mute initial MOTD
             let muted = true;
@@ -154,11 +173,12 @@ async function createDirectTerminal(shareId: string, session: any, terminalId: s
             stream.on("close", () => {
                 broadcastToTerminalPeers(terminalId, { type: "exit", terminalId, code: 0 });
                 directTerminals.delete(terminalId);
+                removeActiveTerminal(shareId, terminalId);
                 removeTerminal(terminalId);
                 conn.end();
             });
 
-            peer.send(JSON.stringify({ type: "terminal-ready", terminalId }));
+            peer.send(JSON.stringify({ type: "terminal-ready", terminalId, name }));
         });
     } catch (err: any) {
         peer.send(JSON.stringify({ type: "output", terminalId, data: `\r\n\x1b[31m[Connection error: ${err.message}]\x1b[0m\r\n` }));

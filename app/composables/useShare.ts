@@ -22,6 +22,7 @@ const allowTerminal = ref(false);
 const rootPath = ref("");
 const guests = ref<ShareGuest[]>([]);
 const connected = ref(false);
+const sharedTerminals = ref<{id: string, name: string}[]>([]);
 
 // Control WebSocket (presence + lifecycle events)
 let controlWs: WebSocket | null = null;
@@ -97,6 +98,7 @@ export function useShare() {
         rootPath.value = data.rootPath;
         guests.value = data.guests || [];
         connected.value = true;
+        sharedTerminals.value = data.activeTerminals || [];
 
         connectControlWs(id, "guest", data.guestId);
     }
@@ -206,6 +208,14 @@ export function useShare() {
                     allowTerminal.value = msg.allowTerminal;
                 }
                 break;
+            case "terminal-added":
+                if (msg.terminal && !sharedTerminals.value.find((t: any) => t.id === msg.terminal.id)) {
+                    sharedTerminals.value = [...sharedTerminals.value, msg.terminal];
+                }
+                break;
+            case "terminal-removed":
+                sharedTerminals.value = sharedTerminals.value.filter((t: any) => t.id !== msg.terminalId);
+                break;
             case "share-closed":
                 // Host closed the share — guest gets kicked
                 if (role.value === "guest") {
@@ -283,6 +293,9 @@ export function useShare() {
         if (msg.type === "terminal-resize") {
             onRelayTerminalResize?.(msg);
         }
+        if (msg.type === "terminal-close") {
+            onRelayTerminalClose?.(msg);
+        }
     }
 
     function sendRelayMessage(msg: any) {
@@ -305,6 +318,7 @@ export function useShare() {
         rootPath.value = "";
         guests.value = [];
         connected.value = false;
+        sharedTerminals.value = [];
 
         if (controlWs) { controlWs.close(); controlWs = null; }
         if (relayWs) { relayWs.close(); relayWs = null; }
@@ -321,6 +335,7 @@ export function useShare() {
         shareRootPath: readonly(rootPath),
         guests: readonly(guests),
         connected: readonly(connected),
+        sharedTerminals: readonly(sharedTerminals),
 
         // Computed
         isHost,
@@ -345,3 +360,4 @@ export let onShareClosed: (() => void) | null = null;
 export let onRelayTerminalCreate: ((msg: any) => void) | null = null;
 export let onRelayTerminalInput: ((msg: any) => void) | null = null;
 export let onRelayTerminalResize: ((msg: any) => void) | null = null;
+export let onRelayTerminalClose: ((msg: any) => void) | null = null;

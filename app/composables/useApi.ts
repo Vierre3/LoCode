@@ -82,12 +82,19 @@ export function useApi() {
         if (!import.meta.client) return "";
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-        // Guest/host in share mode: use shared terminal WS
-        const { isSharing } = useShare();
-        if (isSharing.value) {
+        // Guests in share mode: use shared terminal WS
+        const { isGuest } = useShare();
+        if (isGuest.value) {
             return `${protocol}//${window.location.host}/_share-terminal`;
         }
 
+        return getLocalWsUrl();
+    }
+
+    /** Local terminal WS URL (bypasses share routing — used by relay handler) */
+    function getLocalWsUrl(): string {
+        if (!import.meta.client) return "";
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const useSSH = webMode || !!getStoredSSHTarget();
         const endpoint = useSSH ? "_ssh-terminal" : "_terminal";
         return `${protocol}//${window.location.host}/${endpoint}`;
@@ -98,5 +105,5 @@ export function useApi() {
         return getStoredSSHTarget() ? "ssh" : "local";
     }
 
-    return { apiFetch, getWsUrl, getMode, isWebMode: webMode, getSessionId };
+    return { apiFetch, getWsUrl, getLocalWsUrl, getMode, isWebMode: webMode, getSessionId };
 }

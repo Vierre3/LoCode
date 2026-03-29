@@ -15,6 +15,7 @@ export default defineEventHandler(async (event) => {
 
     const { session, guest } = result;
     const guests = Array.from(session.guests.values()).map(g => ({ id: g.id, name: g.name }));
+    const activeTerminals = Array.from(session.activeTerminals.entries()).map(([id, name]) => ({ id, name }));
 
     return {
         ok: true,
@@ -23,5 +24,6 @@ export default defineEventHandler(async (event) => {
         allowTerminal: session.allowTerminal,
         hostName: session.hostName,
         guests,
+        activeTerminals,
     };
 });

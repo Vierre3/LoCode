@@ -34,7 +34,9 @@
                     @mousedown="focusedId = s.id">
                     <Terminal :ref="el => setTermRef(s.id, el)" :cwd="rootPath"
                         :active="s.id === activeId || s.id === splitId"
-                        :focused="s.id === focusedId" />
+                        :focused="s.id === focusedId"
+                        :shareTerminalId="s.shareTerminalId"
+                        @shareCreated="terminalId => onShareCreated(s.id, terminalId)" />
                 </div>
             </div>
             <div v-if="!isMobile" class="terminal-sidebar">
@@ -57,6 +59,8 @@
 </template>
 
 <script setup lang="ts">
+const { isSharing, sharedTerminals } = useShare();
+
 const props = defineProps<{
     rootPath: string;
     isMobile: boolean;
@@ -76,6 +80,7 @@ const emit = defineEmits<{
 interface TerminalSession {
     id: string;
     name: string;
+    shareTerminalId?: string; // server's terminal ID (for subscribed sessions)
 }
 
 let nextId = 1;
@@ -91,6 +96,10 @@ function createSessions(count: number): TerminalSession[] {
 }
 
 const sessions = ref<TerminalSession[]>(createSessions(1));
+
+// Track server terminal IDs we've already registered (to avoid duplicates on terminal-added)
+const knownShareIds = new Set<string>();
+
 // activeId = left terminal in split (or the single visible terminal)
 const activeId = ref(sessions.value[0]!.id);
 const splitId = ref<string | null>(null);
@@ -103,6 +112,51 @@ const savedPairsMap = reactive(new Map<string, { left: string; right: string }>(
 const contentRef = ref<HTMLElement | null>(null);
 
 const panelHeight = ref(props.initialTerminalHeight ?? 261);
+
+// --- Share mode: sync sessions from server's sharedTerminals ---
+watch(isSharing, (sharing) => {
+    if (sharing) {
+        knownShareIds.clear();
+        sessions.value = [];
+        splitId.value = null;
+        savedPairsMap.clear();
+    }
+});
+
+watch(sharedTerminals, (list) => {
+    if (!isSharing.value) return;
+    // Add new terminals
+    for (const t of list) {
+        if (!knownShareIds.has(t.id)) {
+            knownShareIds.add(t.id);
+            sessions.value = [...sessions.value, { id: t.id, name: t.name, shareTerminalId: t.id }];
+            // Select first terminal automatically
+            if (sessions.value.length === 1) {
+                activeId.value = t.id;
+                focusedId.value = t.id;
+            }
+        }
+    }
+    // Remove gone terminals
+    const activeIds = new Set(list.map((t: any) => t.id));
+    const before = sessions.value.length;
+    sessions.value = sessions.value.filter(s => {
+        if (s.shareTerminalId && !activeIds.has(s.shareTerminalId)) {
+            knownShareIds.delete(s.shareTerminalId);
+            return false;
+        }
+        return true;
+    });
+    if (sessions.value.length !== before) {
+        // Re-select if active was removed
+        if (!sessions.value.find(s => s.id === activeId.value) && sessions.value.length > 0) {
+            activeId.value = sessions.value[0]!.id;
+            focusedId.value = activeId.value;
+        } else if (sessions.value.length === 0) {
+            emit("close");
+        }
+    }
+}, { deep: true });
 
 watch(() => props.initialTerminalHeight, (val) => {
     if (val !== undefined) panelHeight.value = val;
@@ -118,6 +172,14 @@ function setTermRef(id: string, el: any) {
 
 function focusTerminal(id: string) {
     nextTick(() => termRefs[id]?.focus());
+}
+
+function onShareCreated(localId: string, serverTerminalId: string) {
+    const s = sessions.value.find(s => s.id === localId);
+    if (s) {
+        s.shareTerminalId = serverTerminalId;
+        knownShareIds.add(serverTerminalId);
+    }
 }
 
 function termSlotClass(id: string) {
@@ -296,6 +358,11 @@ function addSession() {
 }
 
 function removeSession() {
+    const removedId = focusedId.value;
+    // In share mode, tell server to close the terminal
+    if (isSharing.value) {
+        termRefs[removedId]?.closeShared?.();
+    }
     if (sessions.value.length <= 1) {
         sessions.value = [];
         splitId.value = null;
@@ -305,7 +372,6 @@ function removeSession() {
         emit("close");
         return;
     }
-    const removedId = focusedId.value;
     const idx = sessions.value.findIndex(s => s.id === removedId);
     sessions.value = sessions.value.filter(s => s.id !== removedId);
 

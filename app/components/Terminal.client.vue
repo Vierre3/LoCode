@@ -22,10 +22,15 @@ const props = defineProps<{
     cwd: string;
     active: boolean;
     focused: boolean;
+    shareTerminalId?: string; // if set, subscribe to this existing server terminal instead of creating
+}>();
+
+const emit = defineEmits<{
+    shareCreated: [terminalId: string];
 }>();
 
 const { getWsUrl, getMode, getSessionId } = useApi();
-const { isSharing, shareId: shareSessionId, guestId: shareGuestId } = useShare();
+const { isSharing, isHost: shareIsHost, shareId: shareSessionId, guestId: shareGuestId, getShareTerminalWsUrl } = useShare();
 
 const termContainer = ref<HTMLDivElement | null>(null);
 let term: Terminal | null = null;
@@ -64,11 +69,12 @@ let sharedTerminalId: string | null = null;
 
 function connectWs() {
     if (disposed || !term) return;
-    ws = new WebSocket(getWsUrl());
+    const wsUrl = isSharing.value ? getShareTerminalWsUrl() : getWsUrl();
+    ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
         if (isSharing.value && shareSessionId.value) {
-            // Share mode: send auth first, then create after auth-ok
+            // Share mode: send auth first, then subscribe/create after auth-ok
             ws!.send(JSON.stringify({
                 type: "auth",
                 shareId: shareSessionId.value,
@@ -89,15 +95,27 @@ function connectWs() {
         try {
             const msg = JSON.parse(event.data);
             if (msg.type === "auth-ok" && isSharing.value) {
-                // Auth succeeded — now create the shared terminal
-                ws!.send(JSON.stringify({
-                    type: "create",
-                    cwd: props.cwd || undefined,
-                    cols: term!.cols,
-                    rows: term!.rows,
-                }));
+                if (props.shareTerminalId) {
+                    // Subscribe to an existing server terminal
+                    sharedTerminalId = props.shareTerminalId;
+                    ws!.send(JSON.stringify({
+                        type: "subscribe",
+                        terminalId: props.shareTerminalId,
+                    }));
+                } else {
+                    // Create a new shared terminal
+                    ws!.send(JSON.stringify({
+                        type: "create",
+                        cwd: props.cwd || undefined,
+                        cols: term!.cols,
+                        rows: term!.rows,
+                    }));
+                }
             } else if (msg.type === "terminal-ready") {
                 sharedTerminalId = msg.terminalId;
+                if (!props.shareTerminalId) {
+                    emit("shareCreated", msg.terminalId);
+                }
             } else if (msg.type === "output" && term) {
                 term.write(msg.data);
             } else if (msg.type === "exit" && term) {
@@ -250,7 +268,12 @@ onMounted(async () => {
 });
 
 defineExpose({
-    focus() { term?.focus(); }
+    focus() { term?.focus(); },
+    closeShared() {
+        if (sharedTerminalId && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "close", terminalId: sharedTerminalId }));
+        }
+    },
 });
 
 watch(() => props.active, (active) => {

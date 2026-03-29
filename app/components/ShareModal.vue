@@ -432,7 +432,8 @@ function copyLink() {
     font-weight: 600;
 }
 .guest-item.you {
-    color: rgba(100, 180, 255, 0.9);
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
 }
 .user-dot {
     width: 6px;
