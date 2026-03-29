@@ -28,6 +28,8 @@ const sharedTerminals = ref<{id: string, name: string}[]>([]);
 let controlWs: WebSocket | null = null;
 // Relay WebSocket (desktop host only — forwards guest requests)
 let relayWs: WebSocket | null = null;
+// Buffered messages waiting for relay WS to be ready
+let relayMsgQueue: any[] = [];
 // Remote server URL (desktop host sharing via Railway)
 let remoteServerUrl: string | null = null;
 
@@ -249,6 +251,13 @@ export function useShare() {
         relayWs.onmessage = (ev) => {
             try {
                 const msg = JSON.parse(ev.data);
+                if (msg.type === "auth-ok") {
+                    // Flush any messages that were queued before the relay was ready
+                    const queued = relayMsgQueue.splice(0);
+                    for (const m of queued) {
+                        relayWs?.send(JSON.stringify(m));
+                    }
+                }
                 handleRelayMessage(msg);
             } catch {}
         };
@@ -309,7 +318,12 @@ export function useShare() {
     }
 
     function sendRelayMessage(msg: any) {
-        relayWs?.send(JSON.stringify(msg));
+        if (relayWs?.readyState === WebSocket.OPEN) {
+            relayWs.send(JSON.stringify(msg));
+        } else {
+            // Buffer until relay WS is connected and authenticated
+            relayMsgQueue.push(msg);
+        }
     }
 
     // --- Shared terminal WebSocket URL ---
@@ -332,6 +346,7 @@ export function useShare() {
 
         if (controlWs) { controlWs.close(); controlWs = null; }
         if (relayWs) { relayWs.close(); relayWs = null; }
+        relayMsgQueue = [];
         remoteServerUrl = null;
     }
 

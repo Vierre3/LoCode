@@ -124,7 +124,7 @@ watch(isSharing, (sharing) => {
     }
 });
 
-watch(sharedTerminals, (list) => {
+watch(() => sharedTerminals.value, (list) => {
     if (!isSharing.value) return;
     // Add new terminals we don't have yet
     for (const t of list) {

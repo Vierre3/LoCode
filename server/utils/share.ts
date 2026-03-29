@@ -255,16 +255,23 @@ export function resolveRelayResponse(reqId: string, status: number, body: any): 
 // --- Shared terminal peer registry ---
 // Centralized here to avoid circular imports between _share-terminal.ts and _share-relay.ts
 
+const MAX_TERMINAL_BUFFER = 50 * 1024; // 50KB rolling replay buffer per terminal
+
 interface SharedTerminalEntry {
     peers: Set<Peer>;
+    outputBuffer: string; // rolling buffer for late subscribers
 }
 const sharedTerminals = new Map<string, SharedTerminalEntry>();
 
 export function registerTerminalPeer(terminalId: string, peer: Peer): void {
     let entry = sharedTerminals.get(terminalId);
     if (!entry) {
-        entry = { peers: new Set() };
+        entry = { peers: new Set(), outputBuffer: "" };
         sharedTerminals.set(terminalId, entry);
+    }
+    // Replay buffered output to late subscriber
+    if (entry.outputBuffer.length > 0) {
+        try { peer.send(JSON.stringify({ type: "output", terminalId, data: entry.outputBuffer })); } catch {}
     }
     entry.peers.add(peer);
 }
@@ -280,6 +287,13 @@ export function unregisterTerminalPeer(terminalId: string, peer: Peer): void {
 export function broadcastToTerminalPeers(terminalId: string, message: any): void {
     const entry = sharedTerminals.get(terminalId);
     if (!entry) return;
+    // Accumulate output in rolling replay buffer for late subscribers
+    if (message.type === "output" && typeof message.data === "string") {
+        entry.outputBuffer += message.data;
+        if (entry.outputBuffer.length > MAX_TERMINAL_BUFFER) {
+            entry.outputBuffer = entry.outputBuffer.slice(entry.outputBuffer.length - MAX_TERMINAL_BUFFER);
+        }
+    }
     const msg = JSON.stringify(message);
     for (const peer of entry.peers) {
         try { peer.send(msg); } catch {}
