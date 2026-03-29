@@ -135,11 +135,11 @@ export function updateShareRootPath(shareId: string, rootPath: string): void {
     session.rootPath = rootPath;
 }
 
-export function addActiveTerminal(shareId: string, terminalId: string, name: string): void {
+export function addActiveTerminal(shareId: string, terminalId: string, name: string, creatorId?: string): void {
     const session = shares.get(shareId);
     if (!session) return;
     session.activeTerminals.set(terminalId, name);
-    broadcastControl(shareId, { type: "terminal-added", terminal: { id: terminalId, name } });
+    broadcastControl(shareId, { type: "terminal-added", terminal: { id: terminalId, name }, creatorId });
 }
 
 export function removeActiveTerminal(shareId: string, terminalId: string): void {

@@ -41,7 +41,7 @@
                             <input class="field-input share-link" :value="shareUrl" readonly
                                 @click="($event.target as HTMLInputElement).select()" />
                             <button class="dialog-btn copy" @click="copyLink" :class="{ copied }">
-                                {{ copied ? 'Copied!' : 'Copy' }}
+                                {{ copied ? 'Copied' : 'Copy' }}
                             </button>
                         </div>
 

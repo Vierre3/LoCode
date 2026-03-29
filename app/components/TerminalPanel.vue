@@ -59,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-const { isSharing, sharedTerminals } = useShare();
+const { isSharing, sharedTerminals, addSharedTerminal } = useShare();
 
 const props = defineProps<{
     rootPath: string;
@@ -95,16 +95,17 @@ function createSessions(count: number): TerminalSession[] {
     return arr;
 }
 
-const sessions = ref<TerminalSession[]>(createSessions(1));
+// In share mode, start empty — sharedTerminals watcher will populate sessions
+const sessions = ref<TerminalSession[]>(isSharing.value ? [] : createSessions(1));
 
 // Track server terminal IDs we've already registered (to avoid duplicates on terminal-added)
 const knownShareIds = new Set<string>();
 
 // activeId = left terminal in split (or the single visible terminal)
-const activeId = ref(sessions.value[0]!.id);
+const activeId = ref(sessions.value[0]?.id ?? '');
 const splitId = ref<string | null>(null);
 // focusedId = which terminal is highlighted/selected in sidebar
-const focusedId = ref(sessions.value[0]!.id);
+const focusedId = ref(sessions.value[0]?.id ?? '');
 const splitRatio = ref(50);
 
 // Map: terminalId → { left, right } for ALL saved (non-active) split pairs
@@ -125,7 +126,7 @@ watch(isSharing, (sharing) => {
 
 watch(sharedTerminals, (list) => {
     if (!isSharing.value) return;
-    // Add new terminals
+    // Add new terminals we don't have yet
     for (const t of list) {
         if (!knownShareIds.has(t.id)) {
             knownShareIds.add(t.id);
@@ -137,18 +138,17 @@ watch(sharedTerminals, (list) => {
             }
         }
     }
-    // Remove gone terminals
-    const activeIds = new Set(list.map((t: any) => t.id));
+    // Remove terminals no longer on server
+    const serverIds = new Set(list.map((t: any) => t.id));
     const before = sessions.value.length;
     sessions.value = sessions.value.filter(s => {
-        if (s.shareTerminalId && !activeIds.has(s.shareTerminalId)) {
+        if (s.shareTerminalId && !serverIds.has(s.shareTerminalId)) {
             knownShareIds.delete(s.shareTerminalId);
             return false;
         }
         return true;
     });
     if (sessions.value.length !== before) {
-        // Re-select if active was removed
         if (!sessions.value.find(s => s.id === activeId.value) && sessions.value.length > 0) {
             activeId.value = sessions.value[0]!.id;
             focusedId.value = activeId.value;
@@ -156,7 +156,7 @@ watch(sharedTerminals, (list) => {
             emit("close");
         }
     }
-}, { deep: true });
+}, { deep: true, immediate: true });
 
 watch(() => props.initialTerminalHeight, (val) => {
     if (val !== undefined) panelHeight.value = val;
@@ -179,6 +179,8 @@ function onShareCreated(localId: string, serverTerminalId: string) {
     if (s) {
         s.shareTerminalId = serverTerminalId;
         knownShareIds.add(serverTerminalId);
+        // Add to sharedTerminals so terminal-removed can clean it up
+        addSharedTerminal(serverTerminalId, s.name);
     }
 }
 
@@ -520,10 +522,13 @@ function resetSessions(count: number, splitIndex: number, savedPairsData?: [numb
 
 function ensureSession() {
     if (sessions.value.length === 0) {
+        // In share mode, if the server already has terminals they'll appear via the watcher.
+        // Only create a new local session if there are genuinely no shared terminals yet.
+        if (isSharing.value && sharedTerminals.value.length > 0) return;
         nextId = 1;
         epoch = Date.now();
         savedPairsMap.clear();
-        sessions.value = createSessions(1);
+        sessions.value = isSharing.value ? [{ id: `t${epoch}-${nextId++}`, name: 'Terminal 1' }] : createSessions(1);
         activeId.value = sessions.value[0]!.id;
         focusedId.value = activeId.value;
         splitId.value = null;

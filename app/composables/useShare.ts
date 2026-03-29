@@ -147,6 +147,13 @@ export function useShare() {
         }
     }
 
+    // --- Add a terminal to sharedTerminals (called by creator after terminal-ready) ---
+    function addSharedTerminal(id: string, name: string): void {
+        if (!sharedTerminals.value.find((t: any) => t.id === id)) {
+            sharedTerminals.value = [...sharedTerminals.value, { id, name }];
+        }
+    }
+
     // --- Host: refresh info ---
     async function refreshInfo(): Promise<void> {
         if (!shareId.value) return;
@@ -208,11 +215,14 @@ export function useShare() {
                     allowTerminal.value = msg.allowTerminal;
                 }
                 break;
-            case "terminal-added":
-                if (msg.terminal && !sharedTerminals.value.find((t: any) => t.id === msg.terminal.id)) {
+            case "terminal-added": {
+                // Skip if we are the creator — TerminalPanel.onShareCreated will add it via addSharedTerminal
+                const myId = guestId.value || "host";
+                if (msg.terminal && msg.creatorId !== myId && !sharedTerminals.value.find((t: any) => t.id === msg.terminal.id)) {
                     sharedTerminals.value = [...sharedTerminals.value, msg.terminal];
                 }
                 break;
+            }
             case "terminal-removed":
                 sharedTerminals.value = sharedTerminals.value.filter((t: any) => t.id !== msg.terminalId);
                 break;
@@ -350,6 +360,7 @@ export function useShare() {
         updateSettings,
         refreshInfo,
         getShareTerminalWsUrl,
+        addSharedTerminal,
         sendRelayMessage,
         cleanup,
     };

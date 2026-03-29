@@ -68,11 +68,11 @@ export default defineWebSocketHandler({
                     cols: data.cols || 80,
                     rows: data.rows || 24,
                 }));
-                addActiveTerminal(auth.shareId, terminalId, name);
+                addActiveTerminal(auth.shareId, terminalId, name, auth.guestId || "host");
                 peer.send(JSON.stringify({ type: "terminal-ready", terminalId, name }));
             } else {
                 // Direct mode: create SSH shell channel on this server
-                createDirectTerminal(auth.shareId, session, terminalId, name, data, peer);
+                createDirectTerminal(auth.shareId, session, terminalId, name, auth.guestId || "host", data, peer);
             }
         } else if (data.type === "subscribe") {
             const { terminalId } = data;
@@ -139,7 +139,7 @@ function cleanupPeer(peer: any): void {
     peerAuth.delete(peer.id);
 }
 
-async function createDirectTerminal(shareId: string, session: any, terminalId: string, name: string, data: any, peer: any): Promise<void> {
+async function createDirectTerminal(shareId: string, session: any, terminalId: string, name: string, creatorId: string, data: any, peer: any): Promise<void> {
     if (!session.hostSessionId) {
         peer.send(JSON.stringify({ type: "output", terminalId, data: "\r\n\x1b[31m[No SSH session]\x1b[0m\r\n" }));
         return;
@@ -155,7 +155,7 @@ async function createDirectTerminal(shareId: string, session: any, terminalId: s
             }
 
             directTerminals.set(terminalId, { shareId, sshConn: conn, stream });
-            addActiveTerminal(shareId, terminalId, name);
+            addActiveTerminal(shareId, terminalId, name, creatorId);
 
             // Mute initial MOTD
             let muted = true;
