@@ -72,19 +72,23 @@ export default defineWebSocketHandler({
                             terminalConns.set(peer.id, { conn, stream, sessionId });
 
                             // Mute output until clear has finished (hides MOTD/banners and cd command)
+                            // Use broad regex to catch all erase-screen sequences:
+                            // \x1b[J, \x1b[0J, \x1b[1J, \x1b[2J, \x1b[3J (busybox uses \x1b[J)
                             let muted = true;
+                            const eraseScreenRe = /\x1b\[\d*J/;
 
                             stream.on("data", (chunk: Buffer) => {
+                                const str = chunk.toString();
                                 if (muted) {
-                                    // Look for the clear screen escape sequence
-                                    const str = chunk.toString();
-                                    if (str.includes("\x1b[2J")) {
+                                    if (eraseScreenRe.test(str)) {
                                         muted = false;
+                                        // Fall through — send this chunk (contains the clear + anything after)
+                                    } else {
+                                        return;
                                     }
-                                    return;
                                 }
                                 try {
-                                    peer.send(JSON.stringify({ type: "output", data: chunk.toString() }));
+                                    peer.send(JSON.stringify({ type: "output", data: str }));
                                 } catch {
                                     // Peer disconnected
                                 }

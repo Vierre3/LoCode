@@ -157,17 +157,8 @@ async function createDirectTerminal(shareId: string, session: any, terminalId: s
             directTerminals.set(terminalId, { shareId, sshConn: conn, stream });
             addActiveTerminal(shareId, terminalId, name, creatorId);
 
-            // Mute initial MOTD
-            let muted = true;
-            stream.write("clear\n");
-
             stream.on("data", (chunk: Buffer) => {
-                const str = chunk.toString("utf-8");
-                if (muted) {
-                    if (str.includes("\x1b[2J")) muted = false;
-                    else return;
-                }
-                broadcastToTerminalPeers(terminalId, { type: "output", terminalId, data: str });
+                broadcastToTerminalPeers(terminalId, { type: "output", terminalId, data: chunk.toString("utf-8") });
             });
 
             stream.on("close", () => {

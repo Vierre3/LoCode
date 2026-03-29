@@ -74,7 +74,7 @@
                         <div class="section">
                             <p class="section-label">Connected Users ({{ guests.length + 1 }})</p>
                             <ul class="guest-list">
-                                <li class="guest-item host"><span class="user-dot" /> {{ hostName }} (host)</li>
+                                <li class="guest-item"><span class="user-dot" /> {{ hostName }} (host)</li>
                                 <li v-for="g in guests" :key="g.id" class="guest-item"
                                     :class="{ you: g.id === guestId }">
                                     <span class="user-dot" /> {{ g.name }}{{ g.id === guestId ? ' (you)' : '' }}
