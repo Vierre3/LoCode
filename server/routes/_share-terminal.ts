@@ -82,6 +82,9 @@ export default defineWebSocketHandler({
             let subs = peerTerminals.get(peer.id);
             if (!subs) { subs = new Set(); peerTerminals.set(peer.id, subs); }
             subs.add(terminalId);
+            // Confirm subscription so the client knows it's active and can handle input/resize
+            const name = session.activeTerminals.get(terminalId) || "";
+            peer.send(JSON.stringify({ type: "terminal-ready", terminalId, name }));
         } else if (data.type === "input") {
             const { terminalId, data: inputData } = data;
             if (typeof terminalId !== "string" || typeof inputData !== "string") return;

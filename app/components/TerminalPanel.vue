@@ -121,6 +121,10 @@ watch(isSharing, (sharing) => {
         sessions.value = [];
         splitId.value = null;
         savedPairsMap.clear();
+        // Re-ensure a session in case the panel is already visible.
+        // sharedTerminals watcher (immediate) will populate sessions if there are existing
+        // terminals; ensureSession only creates a new local one if nothing else does.
+        nextTick(() => ensureSession());
     }
 });
 

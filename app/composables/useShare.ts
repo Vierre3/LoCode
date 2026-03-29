@@ -384,8 +384,17 @@ export function useShare() {
 }
 
 // --- Event callbacks (set by index.vue or other consumers) ---
-export let onShareClosed: (() => void) | null = null;
-export let onRelayTerminalCreate: ((msg: any) => void) | null = null;
-export let onRelayTerminalInput: ((msg: any) => void) | null = null;
-export let onRelayTerminalResize: ((msg: any) => void) | null = null;
-export let onRelayTerminalClose: ((msg: any) => void) | null = null;
+// Use module-internal variables + setter functions.
+// Direct assignment to ES module namespace objects is read-only in production builds,
+// so we expose setters that mutate the internal bindings.
+let onShareClosed: (() => void) | null = null;
+let onRelayTerminalCreate: ((msg: any) => void) | null = null;
+let onRelayTerminalInput: ((msg: any) => void) | null = null;
+let onRelayTerminalResize: ((msg: any) => void) | null = null;
+let onRelayTerminalClose: ((msg: any) => void) | null = null;
+
+export function setOnShareClosed(cb: (() => void) | null) { onShareClosed = cb; }
+export function setOnRelayTerminalCreate(cb: ((msg: any) => void) | null) { onRelayTerminalCreate = cb; }
+export function setOnRelayTerminalInput(cb: ((msg: any) => void) | null) { onRelayTerminalInput = cb; }
+export function setOnRelayTerminalResize(cb: ((msg: any) => void) | null) { onRelayTerminalResize = cb; }
+export function setOnRelayTerminalClose(cb: ((msg: any) => void) | null) { onRelayTerminalClose = cb; }

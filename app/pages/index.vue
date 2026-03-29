@@ -44,7 +44,9 @@
                 <div class="header-actions">
                     <button @click="saveActivePane" class="btn"
                         :class="{ 'btn-press': savePressing, 'btn-success': saveSuccess }"
-                        :disabled="!activePane?.filePath">Save</button>
+                        :disabled="!activePane?.filePath">
+                        {{ saveSuccess ? 'Saved' : 'Save' }}
+                    </button>
                     <button @click="showShare = true" class="btn share-btn"
                         :class="{ 'btn-sharing': isSharing }"
                         :title="isSharing ? (isGuest ? 'Connected to session' : 'Sharing active') : 'Share session'">
@@ -648,76 +650,73 @@ async function autoJoinShare(sid: string) {
 }
 
 // Register callbacks for share lifecycle + relay terminal handling
-import { onShareClosed as _onShareClosedSetter, onRelayTerminalCreate as _rtcSetter, onRelayTerminalInput as _rtiSetter, onRelayTerminalResize as _rtrSetter, onRelayTerminalClose as _rtclSetter } from '~/composables/useShare';
+import { setOnShareClosed, setOnRelayTerminalCreate, setOnRelayTerminalInput, setOnRelayTerminalResize, setOnRelayTerminalClose } from '~/composables/useShare';
 // Map of relay terminalId → local WebSocket (desktop host bridges guest terminals to local PTY)
 const relayTerminalWs = new Map<string, WebSocket>();
 
 if (import.meta.client) {
-    (async () => {
-        const mod = await import('~/composables/useShare');
-        mod.onShareClosed = () => {
-            resetToFolderSelector();
+    setOnShareClosed(() => {
+        resetToFolderSelector();
+    });
+
+    // Desktop host relay: guest creates a terminal → spawn local terminal, pipe I/O through relay WS
+    setOnRelayTerminalCreate((msg: any) => {
+        const { terminalId, cwd, cols, rows } = msg;
+        const { getLocalWsUrl, getSessionId } = useApi();
+        const { sendRelayMessage } = useShare();
+        // Connect to the local terminal WS (bypasses share routing to avoid loop)
+        const localWs = new WebSocket(getLocalWsUrl());
+        relayTerminalWs.set(terminalId, localWs);
+
+        localWs.onopen = () => {
+            localWs.send(JSON.stringify({
+                type: "create",
+                cwd: cwd || rootPath.value,
+                cols: cols || 80,
+                rows: rows || 24,
+                sessionId: getSessionId(),
+            }));
         };
 
-        // Desktop host relay: guest creates a terminal → spawn local terminal, pipe I/O through relay WS
-        mod.onRelayTerminalCreate = (msg: any) => {
-            const { terminalId, cwd, cols, rows } = msg;
-            const { getLocalWsUrl, getSessionId } = useApi();
-            const { sendRelayMessage } = useShare();
-            // Connect to the local terminal WS (bypasses share routing to avoid loop)
-            const localWs = new WebSocket(getLocalWsUrl());
-            relayTerminalWs.set(terminalId, localWs);
-
-            localWs.onopen = () => {
-                localWs.send(JSON.stringify({
-                    type: "create",
-                    cwd: cwd || rootPath.value,
-                    cols: cols || 80,
-                    rows: rows || 24,
-                    sessionId: getSessionId(),
-                }));
-            };
-
-            localWs.onmessage = (ev) => {
-                try {
-                    const data = JSON.parse(ev.data);
-                    if (data.type === "output") {
-                        sendRelayMessage({ type: "terminal-output", terminalId, data: data.data });
-                    } else if (data.type === "exit") {
-                        sendRelayMessage({ type: "terminal-exit", terminalId, code: data.code ?? 0 });
-                        localWs.close();
-                        relayTerminalWs.delete(terminalId);
-                    }
-                } catch {}
-            };
-
-            localWs.onclose = () => {
-                relayTerminalWs.delete(terminalId);
-            };
+        localWs.onmessage = (ev) => {
+            try {
+                const data = JSON.parse(ev.data);
+                if (data.type === "output") {
+                    sendRelayMessage({ type: "terminal-output", terminalId, data: data.data });
+                } else if (data.type === "exit") {
+                    sendRelayMessage({ type: "terminal-exit", terminalId, code: data.code ?? 0 });
+                    localWs.close();
+                    relayTerminalWs.delete(terminalId);
+                }
+            } catch {}
         };
 
-        mod.onRelayTerminalInput = (msg: any) => {
-            const ws = relayTerminalWs.get(msg.terminalId);
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "input", data: msg.data }));
-            }
+        localWs.onclose = () => {
+            relayTerminalWs.delete(terminalId);
         };
+    });
 
-        mod.onRelayTerminalResize = (msg: any) => {
-            const ws = relayTerminalWs.get(msg.terminalId);
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "resize", cols: msg.cols, rows: msg.rows }));
-            }
-        };
+    setOnRelayTerminalInput((msg: any) => {
+        const ws = relayTerminalWs.get(msg.terminalId);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "input", data: msg.data }));
+        }
+    });
 
-        mod.onRelayTerminalClose = (msg: any) => {
-            const ws = relayTerminalWs.get(msg.terminalId);
-            if (ws) {
-                ws.close();
-                relayTerminalWs.delete(msg.terminalId);
-            }
-        };
-    })();
+    setOnRelayTerminalResize((msg: any) => {
+        const ws = relayTerminalWs.get(msg.terminalId);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "resize", cols: msg.cols, rows: msg.rows }));
+        }
+    });
+
+    setOnRelayTerminalClose((msg: any) => {
+        const ws = relayTerminalWs.get(msg.terminalId);
+        if (ws) {
+            ws.close();
+            relayTerminalWs.delete(msg.terminalId);
+        }
+    });
 }
 
 const editorAreaRef = ref<{ splitRatio: number; focusPane: (id: string) => void } | null>(null);
