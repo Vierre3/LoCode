@@ -630,9 +630,9 @@ function onShareLeft() {
 }
 
 function onShareStopped() {
-    // Host stopped sharing: close relay terminal WebSockets
-    for (const ws of relayTerminalWs.values()) ws.close();
-    relayTerminalWs.clear();
+    // Host stopped sharing: close all relay terminals
+    for (const handle of relayTerminals.values()) handle.close();
+    relayTerminals.clear();
 }
 
 async function autoJoinShare(sid: string) {
@@ -651,71 +651,114 @@ async function autoJoinShare(sid: string) {
 
 // Register callbacks for share lifecycle + relay terminal handling
 import { setOnShareClosed, setOnRelayTerminalCreate, setOnRelayTerminalInput, setOnRelayTerminalResize, setOnRelayTerminalClose } from '~/composables/useShare';
-// Map of relay terminalId → local WebSocket (desktop host bridges guest terminals to local PTY)
-const relayTerminalWs = new Map<string, WebSocket>();
+
+// Unified relay terminal handle — either IPC (Electron) or WebSocket (web/SSH)
+interface RelayTerminalHandle {
+    sendInput(data: string): void;
+    sendResize(cols: number, rows: number): void;
+    close(): void;
+}
+const relayTerminals = new Map<string, RelayTerminalHandle>();
 
 if (import.meta.client) {
     setOnShareClosed(() => {
         resetToFolderSelector();
     });
 
-    // Desktop host relay: guest creates a terminal → spawn local terminal, pipe I/O through relay WS
+    // Desktop host relay: guest creates a terminal → spawn local terminal, pipe I/O back through relay WS
     setOnRelayTerminalCreate((msg: any) => {
         const { terminalId, cwd, cols, rows } = msg;
         const { getLocalWsUrl, getSessionId } = useApi();
         const { sendRelayMessage } = useShare();
-        // Connect to the local terminal WS (bypasses share routing to avoid loop)
-        const localWs = new WebSocket(getLocalWsUrl());
-        relayTerminalWs.set(terminalId, localWs);
+        const electronTerminal = (window as any).electronTerminal as {
+            create: (opts: any) => Promise<{ ok: boolean; error?: string }>;
+            write: (id: string, data: string) => void;
+            resize: (id: string, cols: number, rows: number) => void;
+            kill: (id: string) => void;
+            onData: (cb: (p: { id: string; data: string }) => void) => () => void;
+            onExit: (cb: (p: { id: string; code: number }) => void) => () => void;
+        } | undefined;
 
-        localWs.onopen = () => {
-            localWs.send(JSON.stringify({
-                type: "create",
-                cwd: cwd || rootPath.value,
+        if (electronTerminal) {
+            // Electron: use IPC to main process (node-pty runs there, not in Nuxt subprocess)
+            const ipcId = `relay-${terminalId}`;
+            const offData = electronTerminal.onData(({ id, data }: { id: string; data: string }) => {
+                if (id === ipcId) sendRelayMessage({ type: "terminal-output", terminalId, data });
+            });
+            const offExit = electronTerminal.onExit(({ id, code }: { id: string; code: number }) => {
+                if (id !== ipcId) return;
+                sendRelayMessage({ type: "terminal-exit", terminalId, code });
+                offData();
+                offExit();
+                relayTerminals.delete(terminalId);
+            });
+            electronTerminal.create({
+                id: ipcId,
                 cols: cols || 80,
                 rows: rows || 24,
-                sessionId: getSessionId(),
-            }));
-        };
-
-        localWs.onmessage = (ev) => {
-            try {
-                const data = JSON.parse(ev.data);
-                if (data.type === "output") {
-                    sendRelayMessage({ type: "terminal-output", terminalId, data: data.data });
-                } else if (data.type === "exit") {
-                    sendRelayMessage({ type: "terminal-exit", terminalId, code: data.code ?? 0 });
-                    localWs.close();
-                    relayTerminalWs.delete(terminalId);
+                cwd: cwd || rootPath.value,
+            }).then((result: { ok: boolean; error?: string }) => {
+                if (!result.ok) {
+                    sendRelayMessage({ type: "terminal-output", terminalId, data: `\r\n\x1b[31m[Terminal error: ${result.error}]\x1b[0m\r\n` });
+                    offData();
+                    offExit();
+                    relayTerminals.delete(terminalId);
                 }
-            } catch {}
-        };
-
-        localWs.onclose = () => {
-            relayTerminalWs.delete(terminalId);
-        };
+            });
+            relayTerminals.set(terminalId, {
+                sendInput(data) { electronTerminal.write(ipcId, data); },
+                sendResize(c, r) { electronTerminal.resize(ipcId, c, r); },
+                close() { electronTerminal.kill(ipcId); offData(); offExit(); relayTerminals.delete(terminalId); },
+            });
+        } else {
+            // Web/SSH: use WebSocket to local terminal server
+            const localWs = new WebSocket(getLocalWsUrl());
+            localWs.onopen = () => {
+                localWs.send(JSON.stringify({
+                    type: "create",
+                    cwd: cwd || rootPath.value,
+                    cols: cols || 80,
+                    rows: rows || 24,
+                    sessionId: getSessionId(),
+                }));
+            };
+            localWs.onmessage = (ev) => {
+                try {
+                    const data = JSON.parse(ev.data);
+                    if (data.type === "output") {
+                        sendRelayMessage({ type: "terminal-output", terminalId, data: data.data });
+                    } else if (data.type === "exit") {
+                        sendRelayMessage({ type: "terminal-exit", terminalId, code: data.code ?? 0 });
+                        localWs.close();
+                        relayTerminals.delete(terminalId);
+                    }
+                } catch {}
+            };
+            localWs.onclose = () => { relayTerminals.delete(terminalId); };
+            relayTerminals.set(terminalId, {
+                sendInput(data) {
+                    if (localWs.readyState === WebSocket.OPEN)
+                        localWs.send(JSON.stringify({ type: "input", data }));
+                },
+                sendResize(c, r) {
+                    if (localWs.readyState === WebSocket.OPEN)
+                        localWs.send(JSON.stringify({ type: "resize", cols: c, rows: r }));
+                },
+                close() { localWs.close(); relayTerminals.delete(terminalId); },
+            });
+        }
     });
 
     setOnRelayTerminalInput((msg: any) => {
-        const ws = relayTerminalWs.get(msg.terminalId);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "input", data: msg.data }));
-        }
+        relayTerminals.get(msg.terminalId)?.sendInput(msg.data);
     });
 
     setOnRelayTerminalResize((msg: any) => {
-        const ws = relayTerminalWs.get(msg.terminalId);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "resize", cols: msg.cols, rows: msg.rows }));
-        }
+        relayTerminals.get(msg.terminalId)?.sendResize(msg.cols, msg.rows);
     });
 
     setOnRelayTerminalClose((msg: any) => {
-        const ws = relayTerminalWs.get(msg.terminalId);
-        if (ws) {
-            ws.close();
-            relayTerminalWs.delete(msg.terminalId);
-        }
+        relayTerminals.get(msg.terminalId)?.close();
     });
 }
 
