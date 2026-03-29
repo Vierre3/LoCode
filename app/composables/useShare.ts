@@ -74,8 +74,10 @@ export function useShare() {
 
         connectControlWs(data.shareId, "host", "host");
 
-        // Desktop host always uses relay mode (SSH stays local)
-        if (opts.serverUrl) {
+        // Connect relay WS whenever session is relay mode:
+        // - remote server URL (desktop sharing via Railway) — hostSessionId forced to undefined
+        // - local sharing with no SSH session (desktop local mode) — hostSessionId not set
+        if (opts.serverUrl || !opts.hostSessionId) {
             connectRelayWs(data.shareId);
         }
 
