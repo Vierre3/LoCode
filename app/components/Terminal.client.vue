@@ -116,16 +116,12 @@ function connectWs() {
                 if (!props.shareTerminalId) {
                     emit("shareCreated", msg.terminalId, msg.name ?? "");
                 }
-                // Re-fit and notify PTY of actual dimensions — the replayed output may have
-                // been at different dimensions (guest vs host), causing zsh PROMPT_SP glitch.
+                // Subscribers just adapt locally — never resize the shared PTY.
+                // Only creators sync dimensions (PTY was just created at their size).
                 nextTick(() => {
                     doFit();
-                    if (term && ws && ws.readyState === WebSocket.OPEN) {
+                    if (!props.shareTerminalId && term && ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
-                        // Ctrl+L: tell the shell to redraw the screen, clearing zsh PROMPT_SP `%`
-                        if (props.shareTerminalId) {
-                            ws.send(JSON.stringify({ type: "input", terminalId: sharedTerminalId, data: "\x0c" }));
-                        }
                     }
                 });
             } else if (msg.type === "output" && term) {
