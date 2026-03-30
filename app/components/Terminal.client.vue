@@ -122,6 +122,10 @@ function connectWs() {
                     doFit();
                     if (term && ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
+                        // Ctrl+L: tell the shell to redraw the screen, clearing zsh PROMPT_SP `%`
+                        if (props.shareTerminalId) {
+                            ws.send(JSON.stringify({ type: "input", terminalId: sharedTerminalId, data: "\x0c" }));
+                        }
                     }
                 });
             } else if (msg.type === "output" && term) {
