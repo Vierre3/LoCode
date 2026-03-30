@@ -61,6 +61,7 @@ app/                              # Frontend Nuxt
   composables/
     useApi.ts                     # Fetch centralisé : route vers /api/local/* ou /api/ssh/* + WebSocket + session ID
     useLocodeConfig.ts            # Config workspace persistée (.LoCode file, cache mémoire)
+    useShare.ts                   # État partage collaboratif (host/guest, relay WS, présence, callbacks)
   plugins/
     monaco.client.ts              # Initialisation des workers Monaco
   middleware/
@@ -73,17 +74,28 @@ server/
     read.get.ts, list.get.ts, write.post.ts, stat.get.ts, info.get.ts
   api/ssh/                          # Routes API mode SSH (ssh2 SFTP, session-aware via X-SSH-Session header)
     read.get.ts, list.get.ts, write.post.ts, stat.get.ts, info.get.ts, connect.post.ts, disconnect.post.ts
+  api/share/                        # Routes API partage collaboratif (proxy fichiers + lifecycle)
+    create.post.ts, join.post.ts, close.post.ts, leave.post.ts, settings.post.ts, info.get.ts
+    read.get.ts, write.post.ts, list.get.ts, stat.get.ts
   utils/
     ssh.ts                        # Gestion sessions SSH multi-fenêtres (Map<sessionId, SSHSession>), connexion/déconnexion/SFTP
     session.ts                    # Extraction session ID depuis header X-SSH-Session
+    share.ts                      # Sessions de partage (Map<shareId, ShareSession>), CRUD, relay, terminaux partagés
   plugins/
     ssh-cleanup.ts                # Cleanup terminaux SSH à la perte de connexion
   routes/
     _terminal.ts                  # WebSocket handler + node-pty (terminal local)
     _ssh-terminal.ts              # WebSocket handler SSH (shell channel dédié par terminal)
+    _share.ts                     # WebSocket contrôle partage (présence, lifecycle events)
+    _share-relay.ts               # WebSocket relay desktop host (tunnel requêtes + I/O terminaux)
+    _share-terminal.ts            # WebSocket terminaux partagés (guests + web host)
 
 electron/
   main.cjs                        # Process principal Electron (spawn Nuxt, BrowserWindow, CLI installer)
+  preload.cjs                     # Preload script : expose electronSession + electronTerminal via contextBridge
+
+bin/
+  locode                          # Shell script Unix : lance l'AppImage ou electron en dev avec résolution de chemin
 
 railway.toml                       # Config déploiement Railway (build web-only, start command)
 
@@ -105,8 +117,21 @@ Les routes Nuxt server exposent les mêmes endpoints en mode local et SSH :
 | `/api/{local,ssh}/info` | GET | Info machine (home, user) | — |
 | `/api/ssh/connect` | POST | Connexion SSH (retourne sessionId) | `{ host, port, username, password? }` (body JSON) |
 | `/api/ssh/disconnect` | POST | Déconnexion SSH | header `X-SSH-Session` |
+| `/api/share/create` | POST | Crée une session de partage | `{ rootPath, backendMode, hostSessionId?, allowTerminal, hostName }` |
+| `/api/share/join` | POST | Rejoint une session | `{ shareId, name? }` → `{ rootPath, guestId, allowTerminal, hostName, guests[] }` |
+| `/api/share/close` | POST | Ferme la session (host) | header `X-Share-Session` |
+| `/api/share/leave` | POST | Quitte la session (guest) | `{ shareId, guestId }` |
+| `/api/share/settings` | POST | Met à jour les paramètres | `{ shareId, allowTerminal }` |
+| `/api/share/info` | GET | État de la session | query `shareId` |
+| `/api/share/read` | GET | Lit un fichier (proxy direct ou relay) | headers `X-Share-Session`, `X-Guest-Id` |
+| `/api/share/write` | POST | Écrit un fichier (proxy direct ou relay) | headers `X-Share-Session`, `X-Guest-Id` |
+| `/api/share/list` | GET | Liste un dossier (proxy direct ou relay) | headers `X-Share-Session`, `X-Guest-Id` |
+| `/api/share/stat` | GET | Stat d'un fichier (proxy direct ou relay) | headers `X-Share-Session`, `X-Guest-Id` |
 | `/_terminal` | WebSocket | Shell PTY local (node-pty) | messages JSON (create/input/resize) |
 | `/_ssh-terminal` | WebSocket | Shell PTY distant (ssh2) | messages JSON (create/input/resize/sessionId) |
+| `/_share` | WebSocket | Contrôle partage (présence, events) | auth + lifecycle messages |
+| `/_share-relay` | WebSocket | Relay desktop host | auth + request/response + terminal I/O |
+| `/_share-terminal` | WebSocket | Terminaux partagés | auth + create/subscribe/input/resize/close |
 
 Toutes les routes SSH requièrent le header `X-SSH-Session` contenant l'UUID de session.
 
@@ -384,6 +409,54 @@ git tag v0.1.0 && git push --tags   # déclenche le workflow
 - Shell script WSL lance l'app via `cmd.exe /c` avec le CLI stub (`cli/locode.exe`) : garantit une chaîne de processus 100% Windows native, résout le problème de lock single-instance Electron inaccessible depuis WSL
 - Conversion des chemins WSL → Windows via `wslpath -w` avant de passer en argument
 - `second-instance` handler : `w.show()` + `setAlwaysOnTop(true/false)` pour forcer la fenêtre au premier plan sur Windows (contourne la protection anti-focus-stealing)
+
+### Electron preload (IPC bridge)
+- `electron/preload.cjs` : script de preload Electron — expose deux API au renderer via `contextBridge.exposeInMainWorld`
+- **`window.electronSession`** : `getInitialRoot()` (lit `?root=` depuis l'URL de la fenêtre), `setRoot(path)` (IPC `session:setRoot` pour persister le dossier courant)
+- **`window.electronTerminal`** : `create(opts)`, `write(id, data)`, `resize(id, cols, rows)`, `kill(id)`, `onData(cb)` → retourne unlisten, `onExit(cb)` → retourne unlisten — pont IPC vers node-pty dans le process principal
+
+### Launcher Unix (`bin/locode`)
+- Script shell `bin/locode` : résout l'argument de chemin en absolu, cherche une AppImage dans `dist/`, la lance si trouvée, sinon fallback sur `npx electron electron/main.cjs` (mode dev)
+- Usage : `bin/locode .` ou `bin/locode /path/to/project`
+- Différent du CLI stub Windows (`cli/locode.exe` installé dans PATH) — celui-ci est pour macOS/Linux sans installation globale
+
+### Session collaborative (partage)
+
+#### Vue d'ensemble
+- `app/composables/useShare.ts` : état de partage global — `isHost`, `isGuest`, `shareId`, `guestId`, `shareInfo` (rootPath, allowTerminal, hostName, guests), WebSocket de contrôle, relay WS (desktop host), fonctions `startShare()`, `stopShare()`, `joinShare()`, `leaveShare()`
+- `app/components/ShareModal.vue` : modal UI — création de partage (copie lien, liste guests, toggle terminal, stop), join session (input lien + nom optionnel)
+- `server/utils/share.ts` : gestionnaire de sessions (`Map<shareId, ShareSession>`), CRUD, relay request/response avec timeout 30s, registry terminaux partagés avec buffer replay 50KB, `broadcastControl()` vers tous les peers de contrôle
+- `server/routes/_share.ts` : WebSocket de contrôle — enregistre host/guest peers, relaie events (guest-joined, guest-left, share-closed, settings-changed, terminal-added, terminal-removed), déconnexion host → `closeShare()`
+- **Mode direct** (web host, SSH sur Railway) : requêtes fichiers guests proxifiées directement via `getSftp(hostSessionId)` ou fs Node.js local
+- **Mode relay** (desktop host) : Railway envoie la requête via `_share-relay` WS → desktop exécute localement → réponse retournée → Railway répond au guest
+- Sécurité : `isPathWithinRoot()` valide tous les chemins fichiers guests contre le `rootPath` de la session
+
+#### Architecture relay pour terminaux
+- En mode relay (desktop host), les terminaux partagés utilisent le pont IPC Electron (`window.electronTerminal`) pour spawner le PTY dans le process principal Electron — pas le WebSocket `/_terminal` (Nuxt subprocess) qui échoue avec `posix_spawnp failed` dans ce contexte
+- `index.vue` gère une `Map<string, RelayTerminalHandle>` (`relayTerminals`) qui abstrait Electron IPC ou WebSocket selon le contexte (Electron vs web/SSH)
+- Chaque handle expose `sendInput(data)`, `sendResize(cols, rows)`, `close()` — les callbacks relay (`onRelayTerminalCreate/Input/Resize/Close`) appellent la méthode appropriée selon l'environnement
+
+#### Pattern setter ESM pour callbacks relay
+- Les variables `onRelayTerminalCreate`, `onRelayTerminalInput`, `onRelayTerminalResize`, `onRelayTerminalClose`, `onShareClosed` dans `useShare.ts` sont des `let` privés exposés via des fonctions setter exportées (`setOnRelayTerminalCreate`, etc.)
+- **Raison** : les bindings `export let` sont en lecture seule dans les namespaces ES modules — l'assignation `mod.onXxx = callback` échoue silencieusement dans les builds Rollup/Vite production. Les setters contournent ce problème
+- `index.vue` importe et appelle directement ces setters de manière synchrone (plus d'IIFE async `await import(...)`)
+
+#### Nettoyage propre à l'arrêt du partage
+- Le watcher `isSharing` dans `TerminalPanel.vue` gère les deux transitions (start **et** stop) : vide la liste des sessions et réinitialise l'état dans les deux cas
+- À l'arrêt (`isSharing` passe à `false`) : `index.vue` appelle `terminalPanelRef.value?.ensureSession()` pour créer des sessions terminales normales fraîches
+- Les handles relay (`relayTerminals`) sont tous fermés dans `onShareStopped()` avant la re-création des sessions
+
+#### `terminal-ready` pour les abonnés
+- `server/routes/_share-terminal.ts` : le handler `subscribe` envoie maintenant un message `{ type: "terminal-ready", terminalId, name }` en confirmation — permet au client de définir `sharedTerminalId` et d'activer correctement le routage input/resize
+- Sans cette confirmation, les guests abonnés à un terminal existant ne pouvaient pas envoyer d'input
+
+#### Sync dimensions PTY après `terminal-ready`
+- `Terminal.client.vue` : après réception de `terminal-ready` (création et abonnement), force un `doFit()` + envoie `resize` avec les dimensions réelles de l'xterm
+- Corrige le glitch zsh `%` (PROMPT_SP/PROMPT_CR) : le caractère apparaissait quand les dimensions PTY ne correspondaient pas aux dimensions xterm au moment de l'abonnement
+
+#### Restauration de session Electron (Windows/Linux)
+- `electron/main.cjs` : sur Windows/Linux, `win.on("closed")` se déclenche **avant** `app.on("before-quit")` — au moment où `before-quit` s'exécute, la map `windows` est déjà vide, donc `saveSessions()` sauvegardait `[]`
+- Fix : dans le handler `closed`, si c'est la dernière fenêtre et que `isQuitting` est false, écrire directement le fichier de session avant de supprimer la fenêtre de la map
 
 ### Refactoring code cleanup
 - Suppression de `server/api/[...url].ts` (ancien proxy Deno catch-all, remplacé par routes `/api/local/*` et `/api/ssh/*`)
