@@ -116,14 +116,26 @@ function connectWs() {
                 if (!props.shareTerminalId) {
                     emit("shareCreated", msg.terminalId, msg.name ?? "");
                 }
-                // Re-fit and notify PTY of actual dimensions — the replayed output may have
-                // been at different dimensions (guest vs host), causing zsh PROMPT_SP glitch.
+                // Fit xterm to container. For subscribed terminals, do NOT send resize to the
+                // PTY — the host already has the right dimensions and resizing triggers zsh's
+                // PROMPT_SP `%` mark. For created terminals, sync PTY dimensions.
                 nextTick(() => {
                     doFit();
-                    if (term && ws && ws.readyState === WebSocket.OPEN) {
+                    if (!props.shareTerminalId && term && ws && ws.readyState === WebSocket.OPEN) {
+                        // Created terminal: sync PTY dimensions
                         ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
                     }
                 });
+                // Second fit after layout settles — fixes cursor-through-prompt on first
+                // panel open for guests (container dimensions may shift after initial mount).
+                if (props.shareTerminalId) {
+                    setTimeout(() => {
+                        if (!disposed && term && fitAddon) {
+                            doFit();
+                            term.scrollToBottom();
+                        }
+                    }, 150);
+                }
             } else if (msg.type === "output" && term) {
                 term.write(msg.data);
             } else if (msg.type === "exit" && term) {
