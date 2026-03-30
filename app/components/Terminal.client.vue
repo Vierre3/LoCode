@@ -264,7 +264,11 @@ onMounted(async () => {
         if (useLocalPty) {
             electronTerminal!.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
-            if (sharedTerminalId) {
+            // Subscribers don't resize via observer — they resized once in terminal-ready.
+            // This prevents the resize ping-pong between peers with different screen sizes.
+            if (props.shareTerminalId) {
+                // subscribed: local doFit() only
+            } else if (sharedTerminalId) {
                 ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
             } else {
                 ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
