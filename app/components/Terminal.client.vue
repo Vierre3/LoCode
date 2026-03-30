@@ -40,7 +40,6 @@ let resizeObserver: ResizeObserver | null = null;
 let ipcCleanups: (() => void)[] = [];
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let disposed = false;
-let skipOutputCount = 0; // skip N output messages after resize-on-subscribe (suppresses zsh % mark)
 // Use local node-pty only in Electron + local mode (not in share mode — share always uses WebSocket)
 const useLocalPty = !!electronTerminal && getMode() === "local" && !isSharing.value;
 
@@ -117,26 +116,18 @@ function connectWs() {
                 if (!props.shareTerminalId) {
                     emit("shareCreated", msg.terminalId, msg.name ?? "");
                 }
-                // Re-fit xterm to container and sync PTY dimensions.
-                // Guests subscribing to host terminals must NOT resize the PTY — that would
-                // change the host's dimensions, causing cursor glitch + zsh PROMPT_SP `%`.
-                // Host subscribing to guest-created terminals DOES resize (needs correct cursor)
-                // with a brief output mute to suppress the `%` mark.
+                // Subscribers just adapt locally via doFit() — never resize the PTY.
+                // Resizing would change dimensions for all peers, causing cursor glitch
+                // and zsh PROMPT_SP `%` on the terminal creator's side.
                 nextTick(() => {
                     doFit();
-                    const isSubscribing = !!props.shareTerminalId;
-                    const shouldResize = !isSubscribing || shareIsHost.value;
-                    if (shouldResize && term && ws && ws.readyState === WebSocket.OPEN) {
+                    if (!props.shareTerminalId && term && ws && ws.readyState === WebSocket.OPEN) {
+                        // Only newly created terminals sync PTY dimensions
                         ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
-                        // Skip next output message after resize on subscribe (zsh PROMPT_SP `%`)
-                        if (isSubscribing) {
-                            skipOutputCount = 1;
-                        }
                     }
                 });
             } else if (msg.type === "output" && term) {
-                if (skipOutputCount > 0) { skipOutputCount--; }
-                else { term.write(msg.data); }
+                term.write(msg.data);
             } else if (msg.type === "exit" && term) {
                 term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
             }
