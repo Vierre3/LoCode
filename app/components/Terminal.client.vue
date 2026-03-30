@@ -40,6 +40,7 @@ let resizeObserver: ResizeObserver | null = null;
 let ipcCleanups: (() => void)[] = [];
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let disposed = false;
+let muteOutput = false;
 // Use local node-pty only in Electron + local mode (not in share mode — share always uses WebSocket)
 const useLocalPty = !!electronTerminal && getMode() === "local" && !isSharing.value;
 
@@ -116,17 +117,26 @@ function connectWs() {
                 if (!props.shareTerminalId) {
                     emit("shareCreated", msg.terminalId, msg.name ?? "");
                 }
-                // Re-fit xterm to container. For subscribed terminals, do NOT resize the
-                // PTY — doing so changes dimensions for the host, causing cursor glitch
-                // and triggering zsh's PROMPT_SP `%` mark.
+                // Re-fit xterm to container and sync PTY dimensions.
+                // Guests subscribing to host terminals must NOT resize the PTY — that would
+                // change the host's dimensions, causing cursor glitch + zsh PROMPT_SP `%`.
+                // Host subscribing to guest-created terminals DOES resize (needs correct cursor)
+                // with a brief output mute to suppress the `%` mark.
                 nextTick(() => {
                     doFit();
-                    if (!props.shareTerminalId && term && ws && ws.readyState === WebSocket.OPEN) {
+                    const isSubscribing = !!props.shareTerminalId;
+                    const shouldResize = !isSubscribing || shareIsHost.value;
+                    if (shouldResize && term && ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
+                        // Mute output briefly after resize on subscribe to suppress zsh PROMPT_SP `%`
+                        if (isSubscribing) {
+                            muteOutput = true;
+                            setTimeout(() => { muteOutput = false; }, 150);
+                        }
                     }
                 });
             } else if (msg.type === "output" && term) {
-                term.write(msg.data);
+                if (!muteOutput) term.write(msg.data);
             } else if (msg.type === "exit" && term) {
                 term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
             }
