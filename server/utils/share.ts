@@ -260,14 +260,19 @@ const MAX_TERMINAL_BUFFER = 50 * 1024; // 50KB rolling replay buffer per termina
 interface SharedTerminalEntry {
     peers: Set<Peer>;
     outputBuffer: string; // rolling buffer for late subscribers
+    peerDimensions: Map<string, { cols: number; rows: number }>; // peerId → last known dimensions
+    currentDimensions: { cols: number; rows: number }; // current PTY dimensions
 }
 const sharedTerminals = new Map<string, SharedTerminalEntry>();
 
-export function registerTerminalPeer(terminalId: string, peer: Peer): void {
+export function registerTerminalPeer(terminalId: string, peer: Peer, dims?: { cols: number; rows: number }): void {
     let entry = sharedTerminals.get(terminalId);
     if (!entry) {
-        entry = { peers: new Set(), outputBuffer: "" };
+        entry = { peers: new Set(), outputBuffer: "", peerDimensions: new Map(), currentDimensions: { cols: 80, rows: 24 } };
         sharedTerminals.set(terminalId, entry);
+    }
+    if (dims) {
+        entry.peerDimensions.set(peer.id, dims);
     }
     // Replay buffered output to late subscriber
     if (entry.outputBuffer.length > 0) {
@@ -280,6 +285,7 @@ export function unregisterTerminalPeer(terminalId: string, peer: Peer): void {
     const entry = sharedTerminals.get(terminalId);
     if (entry) {
         entry.peers.delete(peer);
+        entry.peerDimensions.delete(peer.id);
         if (entry.peers.size === 0) sharedTerminals.delete(terminalId);
     }
 }
@@ -302,6 +308,47 @@ export function broadcastToTerminalPeers(terminalId: string, message: any): void
 
 export function removeTerminal(terminalId: string): void {
     sharedTerminals.delete(terminalId);
+}
+
+/**
+ * Update a peer's dimensions and compute the minimum across all peers.
+ * Returns the new min dimensions if they differ from the current PTY dimensions, or null if unchanged.
+ */
+export function updateTerminalPeerDimensions(terminalId: string, peerId: string, cols: number, rows: number): { cols: number; rows: number } | null {
+    const entry = sharedTerminals.get(terminalId);
+    if (!entry) return null;
+    entry.peerDimensions.set(peerId, { cols, rows });
+    const min = computeMinDimensions(entry);
+    if (min.cols === entry.currentDimensions.cols && min.rows === entry.currentDimensions.rows) return null;
+    entry.currentDimensions = min;
+    return min;
+}
+
+/**
+ * Recalculate min dimensions after a peer disconnects.
+ */
+export function recalcTerminalDimensions(terminalId: string): { cols: number; rows: number } | null {
+    const entry = sharedTerminals.get(terminalId);
+    if (!entry || entry.peerDimensions.size === 0) return null;
+    const min = computeMinDimensions(entry);
+    if (min.cols === entry.currentDimensions.cols && min.rows === entry.currentDimensions.rows) return null;
+    entry.currentDimensions = min;
+    return min;
+}
+
+function computeMinDimensions(entry: SharedTerminalEntry): { cols: number; rows: number } {
+    let minCols = Infinity;
+    let minRows = Infinity;
+    for (const dims of entry.peerDimensions.values()) {
+        if (dims.cols < minCols) minCols = dims.cols;
+        if (dims.rows < minRows) minRows = dims.rows;
+    }
+    return { cols: minCols === Infinity ? 80 : minCols, rows: minRows === Infinity ? 24 : minRows };
+}
+
+export function setTerminalDimensions(terminalId: string, cols: number, rows: number): void {
+    const entry = sharedTerminals.get(terminalId);
+    if (entry) entry.currentDimensions = { cols, rows };
 }
 
 // --- Path security ---

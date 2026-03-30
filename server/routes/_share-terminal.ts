@@ -1,5 +1,5 @@
 import { defineWebSocketHandler } from "h3";
-import { getShare, registerTerminalPeer, unregisterTerminalPeer, broadcastToTerminalPeers, removeTerminal, addActiveTerminal, removeActiveTerminal } from "../utils/share";
+import { getShare, registerTerminalPeer, unregisterTerminalPeer, broadcastToTerminalPeers, removeTerminal, addActiveTerminal, removeActiveTerminal, updateTerminalPeerDimensions, recalcTerminalDimensions, setTerminalDimensions } from "../utils/share";
 import { createTerminalConnection } from "../utils/ssh";
 import type { Client } from "ssh2";
 
@@ -49,8 +49,10 @@ export default defineWebSocketHandler({
             const terminalId = `st-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             const name = `Terminal ${session.activeTerminals.size + 1}`;
 
-            // Subscribe the creator
-            registerTerminalPeer(terminalId, peer);
+            // Subscribe the creator and store their dimensions
+            const creatorDims = { cols: data.cols || 80, rows: data.rows || 24 };
+            registerTerminalPeer(terminalId, peer, creatorDims);
+            setTerminalDimensions(terminalId, creatorDims.cols, creatorDims.rows);
             let subs = peerTerminals.get(peer.id);
             if (!subs) { subs = new Set(); peerTerminals.set(peer.id, subs); }
             subs.add(terminalId);
@@ -99,14 +101,18 @@ export default defineWebSocketHandler({
             }
         } else if (data.type === "resize") {
             const { terminalId, cols, rows } = data;
-            if (typeof terminalId !== "string") return;
+            if (typeof terminalId !== "string" || typeof cols !== "number" || typeof rows !== "number") return;
+
+            // Update this peer's dimensions and compute min across all peers
+            const newMin = updateTerminalPeerDimensions(terminalId, peer.id, cols, rows);
+            if (!newMin) return; // dimensions unchanged, no PTY resize needed
 
             if (session.mode === "relay" && session.hostRelayPeer) {
-                session.hostRelayPeer.send(JSON.stringify({ type: "terminal-resize", terminalId, cols, rows }));
+                session.hostRelayPeer.send(JSON.stringify({ type: "terminal-resize", terminalId, cols: newMin.cols, rows: newMin.rows }));
             } else {
                 const dt = directTerminals.get(terminalId);
-                if (dt && dt.stream && typeof cols === "number" && typeof rows === "number") {
-                    dt.stream.setWindow(rows, cols, rows * 16, cols * 8);
+                if (dt && dt.stream) {
+                    dt.stream.setWindow(newMin.rows, newMin.cols, newMin.rows * 16, newMin.cols * 8);
                 }
             }
         } else if (data.type === "close") {
@@ -132,10 +138,24 @@ export default defineWebSocketHandler({
 });
 
 function cleanupPeer(peer: any): void {
+    const auth = peerAuth.get(peer.id);
     const subs = peerTerminals.get(peer.id);
     if (subs) {
         for (const terminalId of subs) {
             unregisterTerminalPeer(terminalId, peer);
+            // Recalculate min dimensions — the leaving peer may have been the smallest
+            const newMin = recalcTerminalDimensions(terminalId);
+            if (newMin && auth) {
+                const session = getShare(auth.shareId);
+                if (session) {
+                    if (session.mode === "relay" && session.hostRelayPeer) {
+                        session.hostRelayPeer.send(JSON.stringify({ type: "terminal-resize", terminalId, cols: newMin.cols, rows: newMin.rows }));
+                    } else {
+                        const dt = directTerminals.get(terminalId);
+                        if (dt && dt.stream) dt.stream.setWindow(newMin.rows, newMin.cols, newMin.rows * 16, newMin.cols * 8);
+                    }
+                }
+            }
         }
         peerTerminals.delete(peer.id);
     }
