@@ -40,7 +40,7 @@ let resizeObserver: ResizeObserver | null = null;
 let ipcCleanups: (() => void)[] = [];
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let disposed = false;
-let muteOutput = false;
+let skipOutputCount = 0; // skip N output messages after resize-on-subscribe (suppresses zsh % mark)
 // Use local node-pty only in Electron + local mode (not in share mode — share always uses WebSocket)
 const useLocalPty = !!electronTerminal && getMode() === "local" && !isSharing.value;
 
@@ -128,15 +128,15 @@ function connectWs() {
                     const shouldResize = !isSubscribing || shareIsHost.value;
                     if (shouldResize && term && ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
-                        // Mute output briefly after resize on subscribe to suppress zsh PROMPT_SP `%`
+                        // Skip next output message after resize on subscribe (zsh PROMPT_SP `%`)
                         if (isSubscribing) {
-                            muteOutput = true;
-                            setTimeout(() => { muteOutput = false; }, 150);
+                            skipOutputCount = 1;
                         }
                     }
                 });
             } else if (msg.type === "output" && term) {
-                if (!muteOutput) term.write(msg.data);
+                if (skipOutputCount > 0) { skipOutputCount--; }
+                else { term.write(msg.data); }
             } else if (msg.type === "exit" && term) {
                 term.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
             }
@@ -271,7 +271,10 @@ onMounted(async () => {
         if (useLocalPty) {
             electronTerminal!.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
-            if (sharedTerminalId) {
+            // In share mode, only the host sends resize to avoid breaking other peers' cursors
+            if (isSharing.value && !shareIsHost.value) {
+                // Guest: local fit only, no PTY resize
+            } else if (sharedTerminalId) {
                 ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
             } else {
                 ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
