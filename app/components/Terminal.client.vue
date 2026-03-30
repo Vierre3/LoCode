@@ -116,13 +116,11 @@ function connectWs() {
                 if (!props.shareTerminalId) {
                     emit("shareCreated", msg.terminalId, msg.name ?? "");
                 }
-                // Subscribers just adapt locally via doFit() — never resize the PTY.
-                // Resizing would change dimensions for all peers, causing cursor glitch
-                // and zsh PROMPT_SP `%` on the terminal creator's side.
+                // Re-fit and notify PTY of actual dimensions — the replayed output may have
+                // been at different dimensions (guest vs host), causing zsh PROMPT_SP glitch.
                 nextTick(() => {
                     doFit();
-                    if (!props.shareTerminalId && term && ws && ws.readyState === WebSocket.OPEN) {
-                        // Only newly created terminals sync PTY dimensions
+                    if (term && ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
                     }
                 });
@@ -262,10 +260,7 @@ onMounted(async () => {
         if (useLocalPty) {
             electronTerminal!.resize(termId, term.cols, term.rows);
         } else if (ws && ws.readyState === WebSocket.OPEN) {
-            // In share mode, only the host sends resize to avoid breaking other peers' cursors
-            if (isSharing.value && !shareIsHost.value) {
-                // Guest: local fit only, no PTY resize
-            } else if (sharedTerminalId) {
+            if (sharedTerminalId) {
                 ws.send(JSON.stringify({ type: "resize", terminalId: sharedTerminalId, cols: term.cols, rows: term.rows }));
             } else {
                 ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
