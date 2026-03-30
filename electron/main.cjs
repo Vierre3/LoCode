@@ -158,8 +158,21 @@ function createWindow(rootPath) {
     });
 
     win.on("closed", () => {
-        windows.delete(win);
-        if (!isQuitting) saveSessions();
+        if (!isQuitting) {
+            const root = windows.get(win);
+            windows.delete(win);
+            if (windows.size === 0 && root !== undefined) {
+                // Last window on Windows/Linux: before-quit fires AFTER this, map already empty.
+                // Save the last root now so it's restored on next launch.
+                try { fs.writeFileSync(sessionsFile, JSON.stringify([root || ""]), "utf-8"); } catch (e) {
+                    log(`[session] save error: ${e.message}`);
+                }
+            } else {
+                saveSessions();
+            }
+        } else {
+            windows.delete(win);
+        }
     });
 
     return win;

@@ -633,6 +633,10 @@ function onShareStopped() {
     // Host stopped sharing: close all relay terminals
     for (const handle of relayTerminals.values()) handle.close();
     relayTerminals.clear();
+    // Re-create terminal sessions now that we're back in normal mode
+    if (terminalOpen.value) {
+        nextTick(() => terminalPanelRef.value?.ensureSession());
+    }
 }
 
 async function autoJoinShare(sid: string) {

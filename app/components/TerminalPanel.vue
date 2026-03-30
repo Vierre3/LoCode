@@ -116,16 +116,18 @@ const panelHeight = ref(props.initialTerminalHeight ?? 261);
 
 // --- Share mode: sync sessions from server's sharedTerminals ---
 watch(isSharing, (sharing) => {
+    knownShareIds.clear();
+    sessions.value = [];
+    splitId.value = null;
+    savedPairsMap.clear();
+    nextId = 1;
+    epoch = Date.now();
     if (sharing) {
-        knownShareIds.clear();
-        sessions.value = [];
-        splitId.value = null;
-        savedPairsMap.clear();
-        // Re-ensure a session in case the panel is already visible.
-        // sharedTerminals watcher (immediate) will populate sessions if there are existing
-        // terminals; ensureSession only creates a new local one if nothing else does.
+        // Sharing started: sharedTerminals watcher (immediate) populates sessions if terminals
+        // already exist; ensureSession creates a pending local one if needed.
         nextTick(() => ensureSession());
     }
+    // Sharing stopped: sessions cleared above. index.vue calls ensureSession() when terminal is open.
 });
 
 watch(() => sharedTerminals.value, (list) => {
